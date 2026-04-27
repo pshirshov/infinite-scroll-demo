@@ -1,0 +1,86 @@
+# scroll-demo — Task Ledger
+
+Authoritative ledger of planned and completed work. Scope governed by
+`./docs/drafts/20260427-2304-m1-plan.md`.
+
+Status: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked
+
+---
+
+## Milestones (high-level)
+
+- [~] **M1** — Index-space-scrolled chat demo: ChatStore + ChatViewport + custom scrollbar + mock backend + extras (search, day headers, live tail, jump-to-latest), all six functional requirements met at N ≥ 1M.
+
+---
+
+## Milestone 1 — PR breakdown
+
+Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
+
+- [x] **PR-01** — Vite + React 19 + TS strict scaffold; pnpm scripts; hello-world boots.
+- [ ] **PR-02** — `MockBackend` with deterministic content gen, all endpoints, abortable, unit-tested.
+- [ ] **PR-03** — `ChatStore` regions + heights map + observable; pure logic, fuzz-tested.
+- [ ] **PR-04** — Index-space scroll engine over a fixed preloaded slice; wheel/keyboard input; ResizeObserver.
+- [ ] **PR-05** — On-demand fetch + region merging + request coalescing; skeleton rows for unloaded.
+- [ ] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
+- [ ] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
+- [ ] **PR-08** — `jumpToId` end-to-end + dev input field.
+- [ ] **PR-09** — Day grouping + sticky date header.
+- [ ] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
+- [ ] **PR-11** — Debounced search bar with results dropdown → click jumps.
+- [ ] **PR-12** — Polish, README, default N=5M, full scenario sweep.
+
+---
+
+## Cross-cutting architectural notes (locked)
+
+- [x] **Library versions** — React 19.x, TS 5.9.x strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), Vite 6.x, Vitest 2.x, jsdom 25.x, @testing-library/react 16.x. No UI framework. No virtualization library.
+- [x] **State management** — plain `ChatStore` class with minimal `subscribe/getSnapshot` observable; React adapter via `useSyncExternalStore`. Justification: synchronous per-wheel-event mutations don't fit reducer flow.
+- [x] **Testing** — Vitest in jsdom with a no-op ResizeObserver polyfill (`src/test/setup.ts`). Pure logic gets ≥90% branch coverage on `regions.ts` and `ChatStore`. Layout tests are manual.
+- [x] **CSS** — plain CSS files per component, no modules, no CSS-in-JS. Class names prefixed by component (e.g. `.chat-viewport__row`).
+- [x] **Scroll-settled detection** — 150 ms `setTimeout` after last input; on settle, run `ensureRange` + start eviction debouncer (750 ms further).
+- [x] **Wheel hijack** — `addEventListener('wheel', h, { passive: false })` via `useEffect`; not JSX `onWheel` (which is passive in React 18+). `preventDefault` always.
+- [x] **Eviction × in-flight fetches** — `AbortController` per fetch; aborted on eviction or large jump. Resolved fetches whose target was evicted are dropped silently at resolve time.
+- [x] **Concurrency** — `ensureRange` chunks into ≤100-row windows, dedupes against `regions[]` and `inflight: Map<rangeKey, AbortController>`; same `rangeKey` (= `startIndex`) never fetched twice concurrently.
+- [x] **Coordinate-system invariants (I-1..I-6)** — see plan doc §4. Reviewers must check these every PR. Most critical: I-2 (layout downward from `topIndex`), I-6 (thumb position depends only on `topIndex` and `N`).
+- [x] **Determinism** — content + latency seeded; URL param `?seed=N` for reproducible bug reports.
+- [x] **Day-header TZ** — browser local via `Intl.DateTimeFormat`. (Was Q-1 in plan.)
+- [x] **Tail-anchor threshold** — last row's bottom within 64 px of viewport bottom counts as "anchored to tail". (Was Q-2 in plan.)
+- [x] **Eviction on jumpToId** — debounced (same path as scroll-settled), not immediate. Recommended by planner; accepts brief retention of departure region in exchange for cheap back-jump. (Was Q-3 in plan.)
+- [x] **No backwards compat** — internal-only code; refactor freely between PRs.
+
+---
+
+## Completed
+
+- **PR-01** (2026-04-27) — Vite + React 19 + TS strict scaffold landed. Stack:
+  React 19.2.5, React-DOM 19.2.5, TypeScript 6.0.3, Vite 8.0.10, Vitest 4.1.5,
+  @vitejs/plugin-react 6.0.1, @testing-library/react 16.3.2, jsdom installed
+  for vitest. App.tsx is a 9-line hello-world; main.tsx mounts in StrictMode.
+  Vitest config inline in `vite.config.ts` with `passWithNoTests: true` and
+  `environment: "jsdom"`. Verification: `pnpm install`, `pnpm typecheck`
+  (= `tsc -b`), `pnpm build`, `pnpm test --run` all exit 0; dev server returns
+  HTML with `#root`.
+  Notes / surprises:
+  - **`composite: true` forbids `noEmit: true`** (TS6310). The original
+    PR-01 plan asked for `noEmit: true` on `tsconfig.node.json`; this is
+    impossible. Mitigated by `outDir: "dist-node"` (gitignored). Recorded
+    in `defects.md` PR-01-D03.
+  - **`pnpm typecheck` MUST be `tsc -b`**, not `tsc --noEmit`. The latter
+    silently skips referenced projects (e.g. `tsconfig.node.json`),
+    masking config-level type errors. Recorded in PR-01-D02. **Future
+    PRs adding new `tsconfig.*.json` projects must add them as references
+    so `tsc -b` covers them.**
+  - **Vitest config in `vite.config.ts` requires `defineConfig` from
+    `vitest/config`** — Vite's own `defineConfig` rejects the `test`
+    field at type level. Recorded in PR-01-D01.
+  - Latest stable resolutions exceeded the planner's hints (TS 6.0.3 vs
+    ^5.9, Vite 8.0.10 vs ^6, Vitest 4.1.5 vs 2.x). All confirmed
+    non-prerelease versions; reviewer accepted.
+  - `tsconfig.node.json` does not set `strict: true`. Reviewer
+    explicitly classified as non-defect (10-line config file, trivial).
+    If future PRs add code to that project, revisit.
+  - Two rounds of adversarial review needed; round 1 found 4 chained
+    defects (D01..D04), all fixed in one coordinated change; round 2
+    GREEN with no regressions.
+
