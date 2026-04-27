@@ -19,7 +19,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 
 - [x] **PR-01** — Vite + React 19 + TS strict scaffold; pnpm scripts; hello-world boots.
 - [x] **PR-02** — `MockBackend` with deterministic content gen, all endpoints, abortable, unit-tested.
-- [ ] **PR-03** — `ChatStore` regions + heights map + observable; pure logic, fuzz-tested.
+- [x] **PR-03** — `ChatStore` regions + heights map + observable; pure logic, fuzz-tested.
 - [ ] **PR-04** — Index-space scroll engine over a fixed preloaded slice; wheel/keyboard input; ResizeObserver.
 - [ ] **PR-05** — On-demand fetch + region merging + request coalescing; skeleton rows for unloaded.
 - [ ] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
@@ -119,4 +119,35 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     by construction. Day-grouping in PR-09 can rely on this.
   - Two rounds of adversarial review: round 1 surfaced 8 defects
     (D01-D08, none major); round 2 GREEN with no regressions.
+
+- **PR-03** (2026-04-27) — `ChatStore` storage layer: pure region
+  functions (`src/store/regions.ts`), observable class
+  (`src/store/ChatStore.ts`), 79 new tests (total 120 across project).
+  Half-open `[start, end)` regions; merge handles adjacency in both
+  directions and three-region bridge merges; on overlap, incoming wins
+  for shared indices. `evictFarRegions` predicate `endIndex > windowStart
+  && startIndex <= windowEnd` (closed window, half-open region); tail
+  protection optional. Heights map cleans evicted-and-out-of-band
+  indices on `evict()`. Snapshot caching + invalidation enforce
+  reference-stable `getSnapshot()` between mutations (required for
+  `useSyncExternalStore`); confirmed by tests.
+  Verification: `pnpm typecheck`, `pnpm test --run` (120 passed),
+  `pnpm build` — all exit 0.
+  Notes / surprises:
+  - **No bounds check `incoming.endIndex <= totalCount`** in
+    `ChatStore.insertRegion` (PR-03-D05). PR-05's fetch coordinator
+    will own that validation at the integration boundary.
+  - **`as Message[]` cast in `regions.ts:88`** (sparse-array
+    initializer) is bounded by an immediate runtime check that throws
+    on any unfilled slot. Not a defect; recorded as PR-03-D01 for
+    transparency.
+  - **`setHeight` is idempotent** when the new value equals the
+    stored value (no listener notification). Necessary to prevent
+    spurious re-renders during ResizeObserver storms; verified by test.
+  - **Snapshot identity is `===`-stable** between mutations.
+    Mutators invalidate via single `invalidateAndNotify()` helper —
+    each mutator notifies exactly once.
+  - One adversarial review: GREEN with 5 minor/informational notes;
+    3 (D02-D04) closed via test additions in a 5-test follow-up;
+    D01 + D05 closed as note-only.
 

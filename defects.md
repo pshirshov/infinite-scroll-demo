@@ -94,9 +94,48 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 **Suggested fix:** Add `expect(() => idToIndex("msg-00001234extra")).toThrow();`.
 
 ### [PR-02-D08] `??` fallback paired with `!` assertion is dead-code noise
-**Status:** under fix
+**Status:** resolved
 **Severity:** nit
 **Location:** `src/backend/contentGen.ts:134, 142`
 **Description:** `CODE_SNIPPETS[snippetIdx] ?? CODE_SNIPPETS[0]!` and `ctx.authors[authorIdx] ?? ctx.authors[0]!` are defensive against `noUncheckedIndexedAccess`, but `snippetIdx`/`authorIdx` are always in-bounds for non-empty arrays. The `!` is a workaround.
-**Suggested fix:** Validate non-empty in the constructor (or treat `CODE_SNIPPETS` as a module invariant) — establish the precondition once; then plain indexing returns `T | undefined` but you can use a small typed helper `pickFromNonEmpty(arr, idx)` that asserts inside, or use `[T, ...T[]]` / `as const` tuple typing for the literal so `[0]` is known-present.
+**Fix:** Added `pickNonEmpty<T>(arr, idx): T` helper at the bottom of `contentGen.ts` (asserts non-empty internally, returns `T`); replaced all three `?? fallback!` patterns. Constructor asserts `config.authors.length > 0`.
+
+---
+
+## PR-03
+
+### [PR-03-D01] `as Message[]` cast in `insertRegion` (informational; bounded by runtime validation)
+**Status:** resolved (note-only — pattern bounded by an immediate runtime check that throws on any unfilled slot)
+**Severity:** nit
+**Location:** `src/store/regions.ts:88`
+**Description:** `const newMessages: Message[] = new Array(newEnd - newStart) as Message[];` uses `as` to declare the freshly-constructed sparse array as fully-populated. The cast does hide that intermediate slots are `undefined`. However, lines 107-117 exhaustively validate no slot is `undefined` and throw if any remain unfilled. The cast's type-hiding is therefore tightly bounded.
+**Fix:** Note-only. A cleaner alternative would be `: (Message | undefined)[]` then narrow after validation; not worth the churn at this stage.
+
+### [PR-03-D02] Test coverage gap: `evictFarRegions` exact-boundary `endIndex === windowStart`
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/store/regions.test.ts`
+**Description:** Brief explicitly called out the boundary `endIndex === centerIndex - keepRadius` (with the half-open-region/closed-window predicate `endIndex > windowStart` evaluating FALSE — region evicted). Adjacent boundaries are tested (endIndex=49 well below; endIndex=51 well above) but the exact-equality case is uncovered.
+**Fix:** Added two boundary tests in `regions.test.ts`: `region(0,50)` against window starting at 50 (evicted) and `region(0,51)` (kept by 1).
+
+### [PR-03-D03] Test coverage gap: `unloadedSubranges` with regions outside the requested range
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/store/regions.test.ts`
+**Description:** Code at `regions.ts:193` correctly skips regions whose `endIndex <= start || startIndex >= end`, but no test exercises this branch.
+**Fix:** Added two tests in `regions.test.ts` exercising both above-range and below-range region positions.
+
+### [PR-03-D04] Test coverage gap: `getHeightMapSizeForTest()` not exercised
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/store/ChatStore.test.ts`
+**Description:** Internal accessor `getHeightMapSizeForTest()` was added but never asserted. Eviction tests check per-index `hasHeight` but a direct size assertion would be tighter.
+**Fix:** Added test asserting map size goes from 2 to 0 after evicting a far region whose two heights had been populated.
+
+### [PR-03-D05] No bounds check `incoming.endIndex <= totalCount` on `ChatStore.insertRegion` (informational)
+**Status:** resolved (note-only — brief explicitly permissive; deferred to the integration boundary)
+**Severity:** nit
+**Location:** `src/store/ChatStore.ts:insertRegion`
+**Description:** Neither `regions.insertRegion` nor `ChatStore.insertRegion` validates that `incoming.endIndex <= totalCount`. Reasonable defensive behavior would be to reject; the brief was explicitly permissive.
+**Fix:** Note-only. PR-05 will own the fetch coordinator that produces incoming regions; bounds-checking belongs there.
 
