@@ -1,8 +1,31 @@
-export function App() {
+import React, { useEffect, useState } from "react";
+import { ChatStore } from "./store/ChatStore";
+import { MockBackend } from "./backend/MockBackend";
+import { ChatViewport } from "./components/ChatViewport";
+import "./styles.css";
+
+const N = 1_000_000;
+
+export function App(): React.JSX.Element {
+  const [store] = useState(() => new ChatStore({ totalCount: N, estimatedRowHeight: 60, keepRadius: 500 }));
+  const [backend] = useState(() => new MockBackend({ totalCount: N, seed: 42 }));
+
+  useEffect(() => {
+    let cancelled = false;
+    backend.getLatest(200).then(({ messages, startIndex }) => {
+      if (cancelled) return;
+      store.insertRegion({ startIndex, endIndex: startIndex + messages.length, messages });
+      store.setTopIndex(startIndex, 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [backend, store]);
+
   return (
-    <main>
-      <h1>scroll-demo</h1>
-      <p>Infinite-scroll demo — work in progress.</p>
-    </main>
+    <div className="app">
+      <h1 className="app__title">scroll-demo</h1>
+      <ChatViewport store={store} />
+    </div>
   );
 }

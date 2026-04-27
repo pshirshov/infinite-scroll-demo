@@ -139,3 +139,70 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 **Description:** Neither `regions.insertRegion` nor `ChatStore.insertRegion` validates that `incoming.endIndex <= totalCount`. Reasonable defensive behavior would be to reject; the brief was explicitly permissive.
 **Fix:** Note-only. PR-05 will own the fetch coordinator that produces incoming regions; bounds-checking belongs there.
 
+---
+
+## PR-04
+
+### [PR-04-D01] ResizeObserver `contentRect.height + 1` under-reports row height by 12 px — adjacent rows visually overlap
+**Status:** resolved
+**Severity:** major
+**Location:** `src/components/MessageRow.tsx:30`
+**Description:** `.chat-message` uses `box-sizing: border-box` (global rule in `styles.css`) plus `padding: 6px 16px;` and `border-bottom: 1px;`. The Resize Observer spec mandates `contentRect.height` excludes padding AND border. So for true border-box height H, `contentRect.height = H − 12 − 1 = H − 13`. The code reports `contentRect.height + 1 = H − 12`. **Each row's reported height is 12 px short of true.** Layout pass at `ChatViewport.tsx:155-170` advances `y` by `store.getHeight(i)` between rows, so row N+1 lands 12 px above row N's bottom border. **Adjacent rows visually overlap by 12 px on every render.** This is the user-perceptible flicker case the user explicitly forbade — every `setHeight` resolution triggers a re-render with these wrong values.
+**Fix:** Replaced height source with `entry.borderBoxSize?.[0]?.blockSize ?? entry.target.getBoundingClientRect().height`. Both report full border-box height including padding and border. Removed `+1` and misleading `// border` comment. Round-2 review confirmed no other `contentRect.height` uses for row layout positioning.
+
+### [PR-04-D02] Initial scroll position lands at the OLDEST of the loaded latest-200, not at the live tail
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/App.tsx:18`
+**Description:** `backend.getLatest(200)` returns `{messages, startIndex: N - 200}`. Boot effect calls `store.setTopIndex(startIndex, 0)`, so the user sees message #999,800 at the top. The actual latest message is ~200 rows below, off-screen. Every chat UI opens at the bottom (newest visible). Jarring as-is.
+**Fix:** Added one-shot `didInitialAnchor` effect in `ChatViewport.tsx:46-60` that fires once when `viewportHeight > 0` and a tail region (`r.endIndex === totalCount`) is loaded. Calls `applyScrollDelta({totalCount-1, 0}, 0, ...)` to snap the last row to viewport bottom, then sets the flag. Effect deps exclude `topIndex/pixelOffset`. `ChatStore.getSnapshot` preserves `regions` array reference across pure `setHeight` updates, so the effect doesn't re-fire on measurement either.
+
+### [PR-04-D03] Wheel listener re-attaches on every `topIndex` change
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/components/ChatViewport.tsx:57-77`
+**Description:** `useEffect` deps `[store, topIndex, viewportHeight]`. Every scroll changes `topIndex` → cleanup detaches and re-attaches the wheel listener. Cheap-but-pointless churn; widens a window where a wheel event lands during the swap.
+**Fix:** Dropped `topIndex` from the dep array (now `[store, viewportHeight]`). Handler reads fresh state via `store.getSnapshot()`. The constant from D04's fix eliminated the only closure dependency on topIndex.
+
+### [PR-04-D04] LINE-mode wheel uses topRow's measured height, not a constant
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/components/ChatViewport.tsx:62`
+**Description:** `wheelDeltaToPixels(e, store.getHeight(topIndex), ...)` makes wheel velocity depend on the topRow's instantaneous height — short topRow scrolls slowly, tall topRow scrolls fast. Spec calls for a fixed `estimatedRowHeight`. Keyboard correctly uses `KEYBOARD_SCROLL_PX = 60`.
+**Fix:** Introduced `WHEEL_LINE_PX = 60` module-level constant (= `KEYBOARD_SCROLL_PX`). Wheel handler uses it directly. No closure dependency on topIndex.
+
+### [PR-04-D05] `Home` bypasses `applyScrollDelta`, violating I-4
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/components/ChatViewport.tsx:97-100`
+**Description:** Spec invariant I-4: "applyScrollDelta is the ONLY mutation path for scroll state." `Home` calls `store.setTopIndex(0, 0)` directly; `End` correctly routes through `applyScrollDelta`. Asymmetry; future-proofing risk.
+**Fix:** Home now routes through `applyScrollDelta({topIndex:0, pixelOffset:0}, 0, totalCount, store, viewportHeight)` then `store.setTopIndex(...)`, mirroring End.
+
+### [PR-04-D06] `MessageRow`'s ResizeObserver `useEffect` uses eslint-disable for `onMeasured` exclusion; rationale is wrong
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/components/MessageRow.tsx:34-35`
+**Description:** Comment says "parent recreates" — but it doesn't (parent's `onMeasured` is `useCallback(..., [store])` with stable store). The eslint-disable is load-bearing on a rationale that is itself incorrect. A future regression introducing a real dep into the parent's `useCallback` would silently produce stale-closure measurements.
+**Fix:** Stashed `onMeasured` in a ref updated synchronously each render; observer callback reads `onMeasuredRef.current(...)`. `useEffect` deps reduced to `[message.index]`. eslint-disable removed.
+
+### [PR-04-D08] Dead `viewportHeight === 0` guard in tail-anchor effect (defaults to 600)
+**Status:** resolved (deferred to PR-12 polish — practically dead code in current flow; race always favors RO measurement before backend fetch resolves)
+**Severity:** nit
+**Location:** `src/components/ChatViewport.tsx:42` (`useState(600)`) and the tail-anchor effect's `=== 0` guard
+**Description:** `viewportHeight` is `useState(600)` (placeholder). The tail-anchor effect's `if (viewportHeight === 0) return` is therefore dead in the normal flow. In practice `MockBackend.getLatest` always awaits a delay, so RO measurement wins the race and the placeholder is overwritten before the anchor fires. Intent — "wait for first measurement before anchoring" — is not actually enforced.
+**Fix:** Deferred. Cleaner pattern is `useState<number | null>(null)` with `if (viewportHeight === null) return`. Defer to PR-12 polish.
+
+### [PR-04-D09] End/Home with last row taller than viewport leaves blank space below (pre-existing)
+**Status:** resolved (deferred — far outside normal data scope; pre-existing in `applyScrollDelta`, not introduced by D05)
+**Severity:** nit
+**Location:** `src/store/scroll.ts:applyScrollDelta`
+**Description:** When `heightOf(totalCount-1) >= viewportHeight`, End yields `{topIndex: last, pixelOffset: 0}` — last row's TOP at viewport top, leaving blank space below. With 60-px estimate vs ~600 px viewport, never triggers in practice.
+**Fix:** Deferred. If row sizes change to allow this case, snap with `pixelOffset = heightOf(last) - viewportHeight`.
+
+### [PR-04-D07] Mid-topRow `pixelOffset` is not adjusted when topRow's measured height changes
+**Status:** resolved (deferred to PR-05+ — pure text rows don't reflow; revisit if images/async content land)
+**Severity:** nit
+**Location:** `src/components/ChatViewport.tsx`, `src/store/ChatStore.ts:setHeight`
+**Description:** When user is mid-topRow and topRow's height changes (e.g. font load, code block reflow), `pixelOffset` stays the same — visible top edge stays put but the content showing there is "different lines" of the same row. Spec-conformant per the topRow-top-pinning convention. For pure text rows that don't reflow async, irrelevant. Will matter if images/async-rendered content lands.
+**Fix:** Deferred. If revisited, scale `pixelOffset` by `newHeight / oldHeight` inside `setHeight` when `index === topIndex`.
+

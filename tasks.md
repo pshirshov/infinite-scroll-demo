@@ -20,7 +20,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-01** — Vite + React 19 + TS strict scaffold; pnpm scripts; hello-world boots.
 - [x] **PR-02** — `MockBackend` with deterministic content gen, all endpoints, abortable, unit-tested.
 - [x] **PR-03** — `ChatStore` regions + heights map + observable; pure logic, fuzz-tested.
-- [ ] **PR-04** — Index-space scroll engine over a fixed preloaded slice; wheel/keyboard input; ResizeObserver.
+- [x] **PR-04** — Index-space scroll engine over a fixed preloaded slice; wheel/keyboard input; ResizeObserver.
 - [ ] **PR-05** — On-demand fetch + region merging + request coalescing; skeleton rows for unloaded.
 - [ ] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
 - [ ] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
@@ -150,4 +150,59 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
   - One adversarial review: GREEN with 5 minor/informational notes;
     3 (D02-D04) closed via test additions in a 5-test follow-up;
     D01 + D05 closed as note-only.
+
+- **PR-04** (2026-04-27) — Index-space scroll engine: the heart of the
+  demo. `(topIndex, pixelOffset)` scroll state, layout flowing
+  downward from topRow at viewport-y `-pixelOffset`, ResizeObserver
+  per row, wheel + keyboard input. App.tsx fetches latest 200
+  messages on boot and renders the viewport.
+  Files: `src/store/scroll.ts` (pure `applyScrollDelta` +
+  `wheelDeltaToPixels`), `src/store/scroll.test.ts` (13 tests),
+  `src/store/useChatStore.ts` (useSyncExternalStore adapter),
+  `src/components/{MessageRow,ChatViewport}.{tsx,css}`,
+  `src/App.tsx`, `src/styles.css`. 133 tests total (+13).
+  Verification: `pnpm typecheck`, `pnpm test --run`, `pnpm build`
+  all exit 0. Bundle ~206 KB JS.
+  Notes / surprises (CRITICAL READING for future PRs):
+  - **`borderBoxSize?.[0]?.blockSize` is the right ResizeObserver
+    height source.** `entry.contentRect.height` is content-box
+    (excludes padding+border) regardless of `box-sizing`. Using
+    `contentRect.height + 1` produced rows that visually overlapped
+    by 12 px every render — exactly the user-visible flicker case
+    the user explicitly forbade. Recorded as PR-04-D01 (the only
+    `major` defect of the project so far). Future PRs adding new
+    measured surfaces MUST use `borderBoxSize` (or `offsetHeight`).
+  - **Layout flows DOWNWARD from topRow.** Above-rows are positioned
+    backward from topRow's top; their height changes don't affect
+    visible content. This is invariant I-2 and is what gives PR-04
+    its anti-flicker guarantee.
+  - **`pixelOffset` is measured from the TOP of `topIndex` row.**
+    When topRow's height changes, the topRow's TOP doesn't move —
+    visible content above and at topRow stays put; rows below
+    reflow naturally. This is invariant I-3.
+  - **`applyScrollDelta` is the SINGLE mutation path** for scroll
+    state (I-4). All inputs (wheel, keyboard Arrow/Page/Home/End,
+    initial-anchor effect) funnel through it. The custom scrollbar
+    in PR-07 will follow the same pattern.
+  - **Initial anchor at the live tail is a one-shot effect inside
+    `ChatViewport`**, gated by `didInitialAnchor` and predicated on
+    the tail region being loaded. App.tsx no longer sets topIndex
+    directly. Recorded as PR-04-D02.
+  - **Wheel listener is attached ONCE per mount** via
+    `addEventListener('wheel', h, { passive: false })` with deps
+    `[store, viewportHeight]`. Handler reads fresh state from
+    `store.getSnapshot()`. Recorded as PR-04-D03.
+  - **`onMeasured` is captured via a ref** in `MessageRow` to avoid
+    stale-closure traps if the parent's callback identity ever
+    changes. Recorded as PR-04-D06.
+  - **`ChatStore.getSnapshot` preserves `regions` array reference**
+    across pure `setHeight` updates — critical so React effects
+    deduped on `regions` don't re-fire on measurement.
+  - **D07 (mid-topRow `pixelOffset` adjustment)** deferred to
+    PR-05+. Pure text rows don't reflow async; revisit if/when
+    images or async content land.
+  - **D08 / D09** are non-blocking nits deferred to PR-12 polish.
+  - Two adversarial review rounds: round 1 surfaced 7 defects (D01
+    major, D02 minor, D03/D04 minor/nit, D05/D06 nits, D07 deferred);
+    round 2 GREEN with 2 new non-blocking nits (D08/D09 deferred).
 

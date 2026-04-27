@@ -1,0 +1,18 @@
+.chat-viewport {
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+  background: var(--bg, #fff);
+  outline: none; /* suppress focus ring on the container; use a subtle ring if desired */
+}
+
+.chat-viewport:focus-visible {
+  outline: 2px solid #4a90e2;
+  outline-offset: -2px;
+}
+
+.chat-viewport__rows {
+  position: absolute;
+  inset: 0;
+}
