@@ -18,7 +18,7 @@ Status: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked
 Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 
 - [x] **PR-01** — Vite + React 19 + TS strict scaffold; pnpm scripts; hello-world boots.
-- [ ] **PR-02** — `MockBackend` with deterministic content gen, all endpoints, abortable, unit-tested.
+- [x] **PR-02** — `MockBackend` with deterministic content gen, all endpoints, abortable, unit-tested.
 - [ ] **PR-03** — `ChatStore` regions + heights map + observable; pure logic, fuzz-tested.
 - [ ] **PR-04** — Index-space scroll engine over a fixed preloaded slice; wheel/keyboard input; ResizeObserver.
 - [ ] **PR-05** — On-demand fetch + region merging + request coalescing; skeleton rows for unloaded.
@@ -83,4 +83,40 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
   - Two rounds of adversarial review needed; round 1 found 4 chained
     defects (D01..D04), all fixed in one coordinated change; round 2
     GREEN with no regressions.
+
+- **PR-02** (2026-04-27) — MockBackend, deterministic content generator,
+  PRNG, and 41 unit tests. Files: `src/backend/{Message,prng,contentGen,
+  MockBackend,MockBackend.test}.ts`, `src/test/setup.ts`. Backend exposes
+  `getTotalCount`, `getRange(start,end,signal)` (half-open, clamps),
+  `getById(id, signal)` (50 before/after), `getLatest(count, signal)`,
+  `subscribeNew(handler) → unsubscribe`, `search(query, signal)`. All
+  async methods abortable via `AbortSignal` → `DOMException("aborted",
+  "AbortError")`. Latency RNG seeded for cross-run determinism;
+  exposed via `peekNextLatencyMs()` `@internal` hook for tests.
+  Verification: `pnpm typecheck`, `pnpm test --run` (41 passed),
+  `pnpm build` — all exit 0.
+  Notes / surprises:
+  - **`pickNonEmpty<T>` helper** in `contentGen.ts` replaces `??` +
+    `!` patterns. Constructor asserts `authors.length > 0`; tuple
+    typing was considered but rejected for clarity. Recorded as
+    PR-02-D08.
+  - **`indexToId` validates `[0, 99_999_999]`** (PR-02-D01). Future
+    risk: `subscribeNew` ticks every 5s; over ~15 years from N=5M
+    the index could exceed the validated range and crash. Acceptable
+    for demo; document if a longer-running mode is added later.
+  - **`search` loop is synchronous** between iterations — abort is
+    only honored at the entry `await delay(...)`. Recorded as
+    PR-02-D04 (dead in-loop check removed). If a future PR adds
+    yields, restore the in-loop check.
+  - **`searchScanBudget` and `searchHitBudget`** are configurable
+    (defaults 50_000 / 50). Tests set `searchScanBudget=10` to verify
+    the cap.
+  - **`peekNextLatencyMs()` consumes RNG state** (named "peek" for
+    brevity but documented). Tests must not interleave with other
+    backend calls when using it. Recorded in JSDoc.
+  - Authored timestamps use ±50% jitter on `avgGapMs`; the worst-case
+    delta is `0`, so timestamps are weakly monotonic (never inverted)
+    by construction. Day-grouping in PR-09 can rely on this.
+  - Two rounds of adversarial review: round 1 surfaced 8 defects
+    (D01-D08, none major); round 2 GREEN with no regressions.
 

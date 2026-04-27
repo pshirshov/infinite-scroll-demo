@@ -40,3 +40,63 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 **Description:** Even after D03 is fixed, defensive practice and the official Vite template ignore `*.tsbuildinfo`. If a developer runs `tsc -b` while D03 is unfixed, three artefacts appear in the project root marked as "modified" by git.
 **Fix:** Appended `*.tsbuildinfo` and `dist-node/` to `.gitignore` (the latter covers the D03 outDir mechanism).
 
+---
+
+## PR-02
+
+### [PR-02-D01] `indexToId` produces malformed IDs for index ≥ 100_000_000 and for negative indices (encoder/decoder asymmetry)
+**Status:** under fix
+**Severity:** minor
+**Location:** `src/backend/Message.ts:22-24`
+**Description:** `indexToId(100000000)` returns `"msg-100000000"` (9 digits) and `indexToId(-1)` returns `"msg-000000-1"`. Both round-trip via `idToIndex` throw `Malformed message id`. The encoder produces values its own decoder rejects — a contract asymmetry. While N=5,000,000 is well under 100M, no upstream guard prevents misuse, and negative inputs corrupt silently.
+**Suggested fix:** Validate `Number.isInteger(index) && index >= 0 && index <= 99_999_999` in `indexToId`, throw `Error("indexToId: index out of range")` otherwise. Keep the 8-digit fixed-width contract (decoder unchanged).
+
+### [PR-02-D02] Test gap: case-insensitive search not asserted to find the same hits regardless of query case
+**Status:** under fix
+**Severity:** minor
+**Location:** `src/backend/MockBackend.test.ts:208-213`
+**Description:** Existing test only checks the snippet contains "the" lowercase when query is "The". Doesn't verify `search("THE")` and `search("the")` return the same hit set. Regression where impl lowercased only body or only query would not be caught.
+**Suggested fix:** Add a test comparing hit indices between `search("the")` and `search("THE")`; assert equal length and pointwise-equal `index` values.
+
+### [PR-02-D03] Test gap: search scan-budget cap (50_000) is not actually verified
+**Status:** under fix
+**Severity:** minor
+**Location:** `src/backend/MockBackend.test.ts` (no test exists)
+**Description:** Implementation caps scan at `Math.min(totalCount, 50_000)`. No test exercises N > 50_000 to verify scan stops. Hit-budget cap is independently enforced; dropping `Math.min` would still pass current tests.
+**Suggested fix:** Add `scanBudget` and `hitBudget` (or just `searchScanBudget`/`searchHitBudget`) to `MockBackendConfig` with current defaults. Test sets `searchScanBudget=10`, asserts that a token guaranteed to appear at index ≥ 10 is NOT in the hit list while ones at index < 10 are.
+
+### [PR-02-D04] Test gap (or unreachable code): mid-loop abort branch in `search` has no test
+**Status:** under fix
+**Severity:** minor
+**Location:** `src/backend/MockBackend.test.ts:365-375`
+**Description:** Existing abort test fires `controller.abort()` synchronously, so the abort happens during the initial `await delay(...)` — never inside the per-row loop. If the implementation has a mid-loop `if (signal?.aborted) throw …` it is uncovered; if the loop is fully synchronous between awaits, the check is unreachable.
+**Suggested fix:** First check the implementation. If the loop is synchronous (no awaits between iterations), REMOVE the dead mid-loop signal check (it can never fire — JS can't service the abort) and add a one-line code comment explaining why no in-loop check is needed. If the loop yields (via `await Promise.resolve()` every K rows, say), add a test that aborts during the scan and asserts `AbortError`. Pick whichever matches current behavior; do not add a yield purely to enable the test.
+
+### [PR-02-D05] Test gap: non-zero latency determinism never asserted
+**Status:** under fix
+**Severity:** minor
+**Location:** `src/backend/MockBackend.test.ts` (no test exists)
+**Description:** Spec: "latency is deterministic across runs" via seeded latency RNG. All tests use min=max=0 (or 100=100), trivially deterministic. A regression replacing `latencyRng` with `Math.random` would not fail any current test.
+**Suggested fix:** Add a test using fake timers and bounds (e.g. min=10, max=20). Two backends with same seed run identical call sequences; capture per-call delay durations (e.g. via `vi.advanceTimersByTime` increments needed); assert sequences equal. Alternatively expose a `peekNextLatencyMs()` test hook on the backend.
+
+### [PR-02-D06] Test gap: emitted live-tail message body not asserted equal to `generateMessage(ctx, N)`
+**Status:** under fix
+**Severity:** nit
+**Location:** `src/backend/MockBackend.test.ts:250-277`
+**Description:** Test only compares `id`. Since `id` depends on index alone, two implementations that diverge on body/author/ts but agree on index would pass.
+**Suggested fix:** Strengthen to `expect(range[0]).toEqual(emittedMessage)`.
+
+### [PR-02-D07] Test gap: `idToIndex` strictness for trailing-junk inputs
+**Status:** under fix
+**Severity:** nit
+**Location:** `src/backend/MockBackend.test.ts:27-38`
+**Description:** Tests cover missing prefix, wrong digit count, non-numeric digits, but not `"msg-00001234extra"` (correct prefix and 8 digits but trailing junk). Current impl rejects it; behavior is just not pinned.
+**Suggested fix:** Add `expect(() => idToIndex("msg-00001234extra")).toThrow();`.
+
+### [PR-02-D08] `??` fallback paired with `!` assertion is dead-code noise
+**Status:** under fix
+**Severity:** nit
+**Location:** `src/backend/contentGen.ts:134, 142`
+**Description:** `CODE_SNIPPETS[snippetIdx] ?? CODE_SNIPPETS[0]!` and `ctx.authors[authorIdx] ?? ctx.authors[0]!` are defensive against `noUncheckedIndexedAccess`, but `snippetIdx`/`authorIdx` are always in-bounds for non-empty arrays. The `!` is a workaround.
+**Suggested fix:** Validate non-empty in the constructor (or treat `CODE_SNIPPETS` as a module invariant) — establish the precondition once; then plain indexing returns `T | undefined` but you can use a small typed helper `pickFromNonEmpty(arr, idx)` that asserts inside, or use `[T, ...T[]]` / `as const` tuple typing for the literal so `[0]` is known-present.
+
