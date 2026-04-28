@@ -12,6 +12,10 @@
  * I-4: applyScrollDelta is the ONLY mutation path for scroll state.
  *      Wheel, keyboard, and future scrollbar drag all funnel through it.
  * I-5: Boundary clamps: pixelOffset >= 0 at topIndex=0; cannot scroll past last row.
+ * I-7: DOM children of `.chat-viewport__rows` MUST be in `topPx`-ascending order so
+ *      browser drag-selection walks them in visual order. The layout pass appends
+ *      below-rows first then above-rows (descending), so an explicit sort by topPx
+ *      is applied after both loops before the JSX .map.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -350,6 +354,13 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         rowsToRender.push({ index: i, topPx: y, firstOfDay });
       }
     }
+
+    // I-7: Sort by topPx ascending so DOM order matches visual order.
+    // The below-loop runs first (topIndex … topIndex+overscanBelow) and the
+    // above-loop appends in descending order, so without this sort DOM order
+    // would not match visual order, causing browser drag-selection to walk
+    // unrelated above-overscan rows.
+    rowsToRender.sort((a, b) => a.topPx - b.topPx);
   }
 
   // ---- Sticky header computation ----

@@ -38,7 +38,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 Detail in `./docs/drafts/20260427-2304-m2-plan.md`.
 
 - [x] **PR-13** — Playwright environment + smoke test (Nix + pnpm + chromium-only headless).
-- [ ] **PR-14** — Selection bug: DOM-order fix in `ChatViewport.tsx` layout pass + Playwright regression test.
+- [x] **PR-14** — Selection bug: DOM-order fix in `ChatViewport.tsx` layout pass + Playwright regression test.
 - [ ] **PR-15** — Empty-bodies after scrollbar drag: reproduce in Playwright first, diagnose, fix.
 
 ---
@@ -243,6 +243,30 @@ Detail in `./docs/drafts/20260427-2304-m2-plan.md`.
     same gotcha as PR-01.
   - No adversarial review (mechanical environment setup); the smoke
     test passing IS the verification.
+
+- **PR-14** (2026-04-27) — Selection bug fix + Playwright regression
+  test. Files: `e2e/selection.spec.ts` (new, 2 tests),
+  `src/components/ChatViewport.tsx` (added I-7 invariant comment +
+  one-line sort).
+  Verification: gates exit 0; 201 unit tests + 3 e2e tests (1 smoke +
+  2 selection) all pass.
+  Notes / surprises:
+  - **Test-first discipline applied.** The drag-select probe FAILED
+    on the unmodified code (`captured === ""` — Chromium produced an
+    empty selection when start/end nodes were in DOM but their
+    ancestors were out of visual order). Fix applied; both tests
+    pass.
+  - **The fix is a single line: `rowsToRender.sort((a, b) =>
+    a.topPx - b.topPx)`** before the JSX `.map`. Two layout loops
+    populate the array in `[below..., above-descending]` order; the
+    sort makes the DOM order match the visual order regardless of
+    how the loops are arranged.
+  - **React reconciles on `key={index}`** (stable per row), so
+    reordering the array does not unmount/remount rows.
+  - **I-7 added to the file's invariants header**: DOM children of
+    `.chat-viewport__rows` MUST be in `topPx`-ascending order.
+    Future layout-pass changes must preserve this.
+  - Recorded as PR-14-D01 (major, user-reported).
 
 - **PR-05** (2026-04-27) — On-demand fetch coordinator + skeleton rows.
   Files: `src/store/fetchCoordinator.{ts,test.ts}`, `src/store/

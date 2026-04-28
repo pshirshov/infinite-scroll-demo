@@ -268,6 +268,17 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 
 ## PR-06
 
+## PR-14
+
+### [PR-14-D01] Drag-selecting text inside one message extended selection across unrelated rows
+**Status:** resolved
+**Severity:** major (user-reported during M1 manual testing)
+**Location:** `src/components/ChatViewport.tsx` layout pass
+**Description:** The layout pass appended below-rows first (`topIndex .. topIndex + below_overscan`), then above-rows in descending order (`topIndex-1 .. topIndex - above_overscan`). DOM children of `.chat-viewport__rows` followed this insertion order, but visual order — driven by `transform: translateY(topPx)` — was `topPx`-ascending. Browser drag-selection walks DOM order, so a user-visible drag from a row to a visually-adjacent row pulled in unrelated overscan rows that happened to come later in the DOM. Reproduced in `e2e/selection.spec.ts`'s drag-select probe (failed on the unmodified code with `captured === ""`).
+**Fix:** After both layout loops complete, sort `rowsToRender` by `topPx` ascending: `rowsToRender.sort((a, b) => a.topPx - b.topPx);`. Documented as new invariant **I-7** in the file's invariants header. React reconciles on `key={index}` (stable per row), so reordering the array does not unmount/remount rows — purely a DOM-order shuffle. Sticky-header logic (`bestAboveFoldTopPx = max`) is order-independent and unaffected. Both Playwright tests pass post-fix; 201 unit tests still green.
+
+---
+
 ## Post-M1 hotfix
 
 ### [POST-D01] First render hangs at N=5M — layout pass walks all `totalCount` indices when `viewportHeight === null`
