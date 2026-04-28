@@ -1,0 +1,16 @@
+.sticky-date-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.95);
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  z-index: 10;
+  pointer-events: none;
+  font-size: 13px;
+  color: #555;
+}

@@ -19,8 +19,11 @@ import type { ChatStore } from "../store/ChatStore";
 import { useChatStoreSnapshot } from "../store/useChatStore";
 import { applyScrollDelta, wheelDeltaToPixels } from "../store/scroll";
 import { MessageRow } from "./MessageRow";
+import type { FirstOfDay } from "./MessageRow";
 import { SkeletonRow } from "./SkeletonRow";
 import { CustomScrollbar } from "./CustomScrollbar";
+import { StickyDateHeader } from "./StickyDateHeader";
+import { dayKey, isDifferentDay } from "../util/day";
 import "./ChatViewport.css";
 
 export interface ChatViewportProps {
@@ -38,6 +41,8 @@ const PAGE_SCROLL_OVERLAP_PX = 40;
 
 /** Extra rows beyond viewport edge to prefetch. */
 const PREFETCH_OVERSCAN = 200;
+
+const STICKY_HEADER_HEIGHT = 32;
 
 /** Debounce delay before issuing ensureRange after scroll settles, ms. */
 const SCROLL_SETTLED_DELAY_MS = 150;
@@ -238,6 +243,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   interface RowEntry {
     index: number;
     topPx: number;
+    firstOfDay: FirstOfDay | undefined;
   }
 
   const rowsToRender: RowEntry[] = [];
@@ -254,7 +260,19 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         if (belowOverscanCount > OVERSCAN_BELOW) break;
       }
       // Include the row regardless of loaded state — skeleton fills the gap.
-      rowsToRender.push({ index: i, topPx: y });
+      let firstOfDay: FirstOfDay | undefined = undefined;
+      const msg = store.findMessage(i);
+      if (msg !== undefined) {
+        if (i === 0) {
+          firstOfDay = { dayKey: dayKey(msg.ts) };
+        } else {
+          const prevMsg = store.findMessage(i - 1);
+          if (prevMsg !== undefined && isDifferentDay(prevMsg.ts, msg.ts)) {
+            firstOfDay = { dayKey: dayKey(msg.ts) };
+          }
+        }
+      }
+      rowsToRender.push({ index: i, topPx: y, firstOfDay });
       y += store.getHeight(i);
       i++;
     }
@@ -267,8 +285,48 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     for (let count = 0; count < OVERSCAN_ABOVE && topIndex - count - 1 >= 0; count++) {
       const i = topIndex - count - 1;
       y -= store.getHeight(i);
+      let firstOfDay: FirstOfDay | undefined = undefined;
+      const msg = store.findMessage(i);
+      if (msg !== undefined) {
+        if (i === 0) {
+          firstOfDay = { dayKey: dayKey(msg.ts) };
+        } else {
+          const prevMsg = store.findMessage(i - 1);
+          if (prevMsg !== undefined && isDifferentDay(prevMsg.ts, msg.ts)) {
+            firstOfDay = { dayKey: dayKey(msg.ts) };
+          }
+        }
+      }
       // Include regardless of loaded state.
-      rowsToRender.push({ index: i, topPx: y });
+      rowsToRender.push({ index: i, topPx: y, firstOfDay });
+    }
+  }
+
+  // ---- Sticky header computation ----
+  // Determine which day the topmost visible content belongs to.
+  let stickyDayKey: string | null = null;
+  const topMsg = store.findMessage(topIndex);
+  if (topMsg !== undefined) {
+    stickyDayKey = dayKey(topMsg.ts);
+  }
+  // Override: if firstOfDay rows have scrolled above the viewport top (topPx <= 0),
+  // the sticky shows the day of the row CLOSEST to the fold — i.e. the most-recently-crossed
+  // day boundary. rowsToRender's order is below-then-above, so we cannot just take the last
+  // match; we must select the firstOfDay row with the maximum topPx (still <= 0).
+  let bestAboveFoldTopPx = -Infinity;
+  for (const row of rowsToRender) {
+    if (row.firstOfDay !== undefined && row.topPx <= 0 && row.topPx > bestAboveFoldTopPx) {
+      bestAboveFoldTopPx = row.topPx;
+      stickyDayKey = row.firstOfDay.dayKey;
+    }
+  }
+
+  // Push-up: if a firstOfDay separator is entering the sticky header's zone from below.
+  let pushUpPx = 0;
+  for (const row of rowsToRender) {
+    if (row.firstOfDay !== undefined && row.topPx > 0 && row.topPx < STICKY_HEADER_HEIGHT) {
+      pushUpPx = STICKY_HEADER_HEIGHT - row.topPx;
+      break;
     }
   }
 
@@ -282,7 +340,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
       onKeyDown={onKeyDown}
     >
       <div className="chat-viewport__rows">
-        {rowsToRender.map(({ index, topPx }) => {
+        {rowsToRender.map(({ index, topPx, firstOfDay }) => {
           const msg = store.findMessage(index);
           if (msg !== undefined) {
             return (
@@ -291,6 +349,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
                 message={msg}
                 absoluteTopPx={topPx}
                 onMeasured={onMeasured}
+                {...(firstOfDay !== undefined ? { firstOfDay } : {})}
               />
             );
           }
@@ -304,6 +363,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
           );
         })}
       </div>
+      <StickyDateHeader dayKey={stickyDayKey} pushUpPx={pushUpPx} />
       <CustomScrollbar
         topIndex={topIndex}
         totalCount={totalCount}

@@ -1,7 +1,12 @@
 import React, { useEffect, useRef } from "react";
 
 import type { Message } from "../backend/Message";
+import { DaySeparator } from "./DaySeparator";
 import "./MessageRow.css";
+
+export interface FirstOfDay {
+  readonly dayKey: string;
+}
 
 export interface MessageRowProps {
   readonly message: Message;
@@ -11,13 +16,15 @@ export interface MessageRowProps {
    * I-1: transform is used (not top) — GPU-composited, no layout thrash on the row itself.
    */
   readonly absoluteTopPx: number;
+  /** If set, renders a DaySeparator above the message body. The separator's height is included in measured height. */
+  readonly firstOfDay?: FirstOfDay;
 }
 
 function formatTs(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function MessageRowInner({ message, onMeasured, absoluteTopPx }: MessageRowProps): React.JSX.Element {
+function MessageRowInner({ message, onMeasured, absoluteTopPx, firstOfDay }: MessageRowProps): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const onMeasuredRef = useRef(onMeasured);
   onMeasuredRef.current = onMeasured;
@@ -44,6 +51,7 @@ function MessageRowInner({ message, onMeasured, absoluteTopPx }: MessageRowProps
       data-index={message.index}
       style={{ transform: `translateY(${absoluteTopPx}px)` }}
     >
+      {firstOfDay !== undefined && <DaySeparator dayKey={firstOfDay.dayKey} />}
       <div className="chat-message__meta">
         <span className="chat-message__author">{message.authorName}</span>
         <span className="chat-message__ts">{formatTs(message.ts)}</span>
@@ -64,5 +72,9 @@ function MessageRowInner({ message, onMeasured, absoluteTopPx }: MessageRowProps
  * onMeasured reference changes are intentionally ignored to avoid spurious ResizeObserver re-attaches.
  */
 export const MessageRow = React.memo(MessageRowInner, (prev, next) => {
-  return prev.message.id === next.message.id && prev.absoluteTopPx === next.absoluteTopPx;
+  return (
+    prev.message.id === next.message.id &&
+    prev.absoluteTopPx === next.absoluteTopPx &&
+    prev.firstOfDay?.dayKey === next.firstOfDay?.dayKey
+  );
 });

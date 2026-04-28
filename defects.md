@@ -268,6 +268,31 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 
 ## PR-06
 
+## PR-09
+
+### [PR-09-D01] Sticky-header override picks the wrong day when multiple firstOfDay rows are above the fold
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/components/ChatViewport.tsx:312-318`
+**Description:** Override loop walks `rowsToRender` and lets the LAST match win. But `rowsToRender` is `[below..., above_in_descending_index]` — above-rows are appended last, so the row with the MOST-NEGATIVE topPx (furthest above the fold) wins, not the one closest to the fold. With two firstOfDay rows above the viewport top, the sticky shows the day of the older boundary instead of the more-recent one.
+**Fix:** Track `bestAboveFoldTopPx` and override only when current row's topPx is GREATER (closer to 0). Single-loop change. Verified gates still pass (197/197 tests).
+
+### [PR-09-N01] `dayLabel("")` returns "Invalid Date" string instead of throwing
+**Status:** resolved (note-only — internal callers always pass valid keys from `dayKey()`; not reachable from user input)
+**Severity:** nit
+**Location:** `src/util/day.ts:20-27`
+**Description:** Empty string yields `Number("")===0` and `Number(undefined)===NaN` → `Invalid Date` string from `Intl.DateTimeFormat`. No crash, but garbage output.
+**Fix:** Note-only. Could harden with regex check; not needed for current call sites.
+
+### [PR-09-N02] Row-height jump on chunk-load creates ~32 px shift below
+**Status:** resolved (note-only — per spec; user's no-flicker rule applies to scroll/measurement, not to lazy-load reflow)
+**Severity:** nit
+**Location:** `src/components/MessageRow.tsx`
+**Description:** When a row's predecessor chunk arrives and they turn out to be on different days, the row gains a 32 px DaySeparator. ResizeObserver fires; rows below shift down by 32 px. Per I-2/I-3 invariants, only below-rows are affected. Acceptable per "no flash/duplicate when crossing days" (which governs the sticky transition, not chunk-load reflow).
+**Fix:** Note-only.
+
+---
+
 ## PR-07
 
 ### [PR-07-D01] `e.target as Element` cast on pointer-capture call (latent foot-gun)

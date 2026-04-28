@@ -25,7 +25,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
 - [x] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
 - [x] **PR-08** — `jumpToId` end-to-end + dev input field.
-- [ ] **PR-09** — Day grouping + sticky date header.
+- [x] **PR-09** — Day grouping + sticky date header.
 - [ ] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
 - [ ] **PR-11** — Debounced search bar with results dropdown → click jumps.
 - [ ] **PR-12** — Polish, README, default N=5M, full scenario sweep.
@@ -338,4 +338,34 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     plus overscan. Additional prefetch happens on next user input
     via the existing scrollSettled flow.
   - One lightweight adversarial review: GREEN, all 7 probes pass.
+
+- **PR-09** (2026-04-27) — Day grouping + sticky date header.
+  Files: `src/util/day.{ts,test.ts}` (10 tests), `src/components/
+  DaySeparator.{tsx,css}` (inline 32 px label), `src/components/
+  StickyDateHeader.{tsx,css}` (absolute overlay, z-index 10),
+  modifications to `MessageRow.tsx` and `ChatViewport.tsx`.
+  197 tests total (+10).
+  Verification: gates exit 0; bundle ~214 KB JS.
+  Notes / surprises:
+  - **Day separators live INSIDE MessageRow** as a child div when
+    `firstOfDay` is set — NOT as a separate index-space row. This
+    keeps the index-space scroll model intact; the row's measured
+    height naturally includes the separator.
+  - **Sticky-header override picks the row with MAX topPx ≤ 0**
+    (closest-to-fold), not the array-last match. PR-09-D01
+    surfaced this as a real bug (the array order is
+    below-then-above-descending, so naive last-wins picked the
+    most-distant-above-fold row). Fixed inline.
+  - **`dayLabel`** uses `Intl.DateTimeFormat` (browser local TZ)
+    with "Today" / "Yesterday" specials. Per cross-cutting
+    decision Q-1 in plan.
+  - **No animations** on either component — the no-flicker rule
+    extends to date-header transitions. Push-up offset is
+    computed per render, not animated.
+  - Row-height jump on chunk-arrival (a row gains a separator
+    when its predecessor finally loads) shifts later rows down
+    by ~32 px. This is per-spec — only below-rows shift, per
+    I-2. Recorded as PR-09-N02 note.
+  - One lightweight adversarial review: 1 minor defect (D01)
+    found and fixed inline; 2 notes recorded.
 
