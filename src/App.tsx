@@ -7,7 +7,7 @@ import { JumpToIdInput } from "./components/JumpToIdInput";
 import { SearchBar } from "./components/SearchBar";
 import "./styles.css";
 
-const N = 1_000_000;
+const N = 5_000_000;
 
 export function App(): React.JSX.Element {
   const [backend] = useState(() => new MockBackend({ totalCount: N, seed: 42 }));

@@ -9,7 +9,7 @@ Status: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked
 
 ## Milestones (high-level)
 
-- [~] **M1** — Index-space-scrolled chat demo: ChatStore + ChatViewport + custom scrollbar + mock backend + extras (search, day headers, live tail, jump-to-latest), all six functional requirements met at N ≥ 1M.
+- [x] **M1** — Index-space-scrolled chat demo: ChatStore + ChatViewport + custom scrollbar + mock backend + extras (search, day headers, live tail, jump-to-latest), all six functional requirements met at N = 5M.
 
 ---
 
@@ -28,7 +28,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-09** — Day grouping + sticky date header.
 - [x] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
 - [x] **PR-11** — Debounced search bar with results dropdown → click jumps.
-- [ ] **PR-12** — Polish, README, default N=5M, full scenario sweep.
+- [x] **PR-12** — Polish, README, default N=5M, full scenario sweep.
 
 ---
 
@@ -420,4 +420,29 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     `animation`, or `transition` per the no-flicker rule.
   - One lightweight adversarial review: GREEN, no defects raised
     (2 acceptable notes).
+
+- **PR-12** (2026-04-27) — Final polish and N bump to 5M. Files:
+  `src/App.tsx` (N: 1M → 5M), `src/components/ChatViewport.tsx`
+  (PR-04-D08 cleanup: `viewportHeight: useState<number | null>(null)`
+  with proper null-guards at every use site; PR-06-D01 cleanup:
+  added `+ snap.estimatedRowHeight` to `distanceToLastRowBottom`
+  in BOTH derivations), `README.md` (full rewrite: ~145 lines covering
+  architecture, requirements mapping, demo scenarios, limitations,
+  testing, layout). Test count unchanged (201).
+  Verification: `pnpm typecheck`, `pnpm test --run` (201 passed),
+  `pnpm build` all exit 0. Bundle 217 KB JS / 69 KB gzip.
+  Notes:
+  - **No TODOs in `src/`** — `grep -rn "TODO|FIXME|XXX"` clean.
+  - **N=5M is the demo default** — boots in well under a second
+    because only `getTotalCount` + `getLatest(200)` are called at
+    init.
+  - **Visual scroll behavior remains manually-verified only** — the
+    8 demo scenarios in the README capture the manual test plan.
+  - The two deferred minor defects (PR-04-D08, PR-06-D01) are
+    closed: the `null` placeholder for viewportHeight prevents a
+    spurious initial-anchor against a 600-px assumption (although
+    in practice the race always favored RO measurement); the
+    tail-anchor formula now correctly represents distance to last
+    row's BOTTOM, matching the spec's "within 64 px of viewport
+    bottom" wording.
 

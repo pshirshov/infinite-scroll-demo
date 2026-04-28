@@ -56,19 +56,23 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   const { topIndex, pixelOffset, totalCount } = snap;
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const [viewportHeight, setViewportHeight] = useState(600);
+  const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const [didInitialAnchor, setDidInitialAnchor] = useState(false);
   const settledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Derived: tail-anchored when last row's estimated bottom is within threshold of viewport bottom.
+  // + estimatedRowHeight converts distance-to-top to distance-to-bottom of the last row.
   const distanceToLastRowBottom =
-    (totalCount - 1 - topIndex) * snap.estimatedRowHeight - pixelOffset;
-  const tailAnchored = totalCount === 0 || distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
+    (totalCount - 1 - topIndex) * snap.estimatedRowHeight + snap.estimatedRowHeight - pixelOffset;
+  const tailAnchored =
+    totalCount === 0 ||
+    viewportHeight === null ||
+    distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
 
   // One-shot: once the viewport has a height and the tail region is loaded, snap to the live tail.
   useEffect(() => {
     if (didInitialAnchor) return;
-    if (viewportHeight === 0) return;
+    if (viewportHeight === null) return;
     const hasTail = snap.regions.some((r) => r.endIndex === snap.totalCount);
     if (!hasTail) return;
     const next = applyScrollDelta(
@@ -110,6 +114,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     }
     settledTimerRef.current = setTimeout(() => {
       settledTimerRef.current = null;
+      if (viewportHeight === null) return;
       const current = store.getSnapshot();
       const visibleRowCount = Math.ceil(viewportHeight / current.estimatedRowHeight);
       const start = current.topIndex - PREFETCH_OVERSCAN;
@@ -119,9 +124,11 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
       store.abortFetchesOutside(start, clampedEnd);
 
       // Tail-anchored: last row's estimated bottom within TAIL_ANCHOR_THRESHOLD_PX of viewport bottom.
-      // (current.totalCount - 1 - current.topIndex) * estimatedRowHeight - pixelOffset ≈ distance from viewport-top to last row bottom
+      // + estimatedRowHeight converts distance-to-top to distance-to-bottom of the last row.
       const distanceToLastRowBottom =
-        (current.totalCount - 1 - current.topIndex) * current.estimatedRowHeight - current.pixelOffset;
+        (current.totalCount - 1 - current.topIndex) * current.estimatedRowHeight +
+        current.estimatedRowHeight -
+        current.pixelOffset;
       const tailAnchored = distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
       store.scheduleEvict(tailAnchored);
     }, SCROLL_SETTLED_DELAY_MS);
@@ -138,6 +145,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
 
   // Snap to tail and clear unseen — shared by the pill click and the follow effect.
   const snapToTail = useCallback(() => {
+    if (viewportHeight === null) return;
     const current = store.getSnapshot();
     const next = applyScrollDelta(
       { topIndex: current.totalCount - 1, pixelOffset: 0 },
@@ -170,6 +178,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     if (el === null) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
+      if (viewportHeight === null) return;
       const dyPx = wheelDeltaToPixels(e, WHEEL_LINE_PX, viewportHeight);
       const current = store.getSnapshot();
       const next = applyScrollDelta(
@@ -191,6 +200,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   // Keyboard handler — only active when the viewport has focus.
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>): void => {
+      if (viewportHeight === null) return;
       let dyPx: number | null = null;
       const current = store.getSnapshot();
 
@@ -288,7 +298,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     let i = topIndex;
     let belowOverscanCount = 0;
     while (i < totalCount) {
-      const inViewport = y < viewportHeight;
+      const inViewport = viewportHeight === null || y < viewportHeight;
       if (!inViewport) {
         belowOverscanCount++;
         if (belowOverscanCount > OVERSCAN_BELOW) break;
@@ -364,7 +374,8 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     }
   }
 
-  const visibleRowCount = Math.max(1, Math.ceil(viewportHeight / snap.estimatedRowHeight));
+  const measuredViewportHeight = viewportHeight ?? 0;
+  const visibleRowCount = Math.max(1, Math.ceil(measuredViewportHeight / snap.estimatedRowHeight));
 
   return (
     <div
@@ -402,7 +413,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         topIndex={topIndex}
         totalCount={totalCount}
         visibleRowCount={visibleRowCount}
-        viewportHeightPx={viewportHeight}
+        viewportHeightPx={measuredViewportHeight}
         onJump={onScrollbarJump}
       />
       <JumpToLatest

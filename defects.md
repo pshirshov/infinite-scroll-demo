@@ -186,7 +186,7 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 **Fix:** Stashed `onMeasured` in a ref updated synchronously each render; observer callback reads `onMeasuredRef.current(...)`. `useEffect` deps reduced to `[message.index]`. eslint-disable removed.
 
 ### [PR-04-D08] Dead `viewportHeight === 0` guard in tail-anchor effect (defaults to 600)
-**Status:** resolved (deferred to PR-12 polish — practically dead code in current flow; race always favors RO measurement before backend fetch resolves)
+**Status:** resolved (in PR-12)
 **Severity:** nit
 **Location:** `src/components/ChatViewport.tsx:42` (`useState(600)`) and the tail-anchor effect's `=== 0` guard
 **Description:** `viewportHeight` is `useState(600)` (placeholder). The tail-anchor effect's `if (viewportHeight === 0) return` is therefore dead in the normal flow. In practice `MockBackend.getLatest` always awaits a delay, so RO measurement wins the race and the placeholder is overwritten before the anchor fires. Intent — "wait for first measurement before anchoring" — is not actually enforced.
@@ -305,7 +305,7 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 ---
 
 ### [PR-06-D01] Tail-anchor formula off by one row-height (advisory)
-**Status:** resolved (note-only — more permissive than spec, harmless)
+**Status:** resolved (in PR-12)
 **Severity:** nit
 **Location:** `src/components/ChatViewport.tsx:111-113`
 **Description:** `distanceToLastRowBottom = (totalCount-1 - topIndex)*estimatedRowHeight - pixelOffset` is actually the distance from viewport-top to last row's TOP. The spec says "last row's bottom within 64px of viewport bottom" — to match, the term should add `+ estimatedRowHeight`. Effect: tail-anchor detection is more permissive by one row-height (~60 px). Doesn't break behavior; comment contradicts the formula.
