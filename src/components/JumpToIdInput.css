@@ -1,0 +1,33 @@
+.jump-to-id {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.jump-to-id input {
+  font-size: 12px;
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  width: 140px;
+}
+
+.jump-to-id button {
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid #999;
+  border-radius: 3px;
+  cursor: pointer;
+  background: #f0f0f0;
+}
+
+.jump-to-id button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.jump-to-id__error {
+  font-size: 11px;
+  color: #c0392b;
+}

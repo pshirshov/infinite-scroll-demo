@@ -43,6 +43,7 @@ export class ChatStore {
   private readonly listeners: Set<() => void> = new Set();
   private cachedSnapshot: ChatStoreSnapshot | null = null;
   private readonly coordinator: FetchCoordinator | null;
+  private readonly backendRef: MockBackend | undefined;
   private evictTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed: boolean = false;
 
@@ -50,6 +51,7 @@ export class ChatStore {
     this.totalCount = config.totalCount;
     this.estimatedRowHeight = config.estimatedRowHeight;
     this.keepRadius = config.keepRadius;
+    this.backendRef = config.backend;
 
     if (config.backend !== undefined) {
       this.coordinator = new FetchCoordinator({
@@ -247,5 +249,23 @@ export class ChatStore {
   /** @internal */
   getHeightMapSizeForTest(): number {
     return this.heights.size;
+  }
+
+  async jumpToId(id: string): Promise<void> {
+    if (this.disposed) return;
+    if (this.backendRef === undefined) throw new Error("ChatStore.jumpToId: no backend configured");
+
+    // Abort all in-flight fetches — we're jumping far away from the current position.
+    this.abortFetchesOutside(0, 0);
+
+    const result = await this.backendRef.getById(id);
+    if (this.disposed) return;
+
+    const startIndex = result.index - result.before.length;
+    const endIndex = result.index + 1 + result.after.length;
+    const messages: Message[] = [...result.before, result.message, ...result.after];
+    this.insertRegion({ startIndex, endIndex, messages });
+    this.setTopIndex(result.index, 0);
+    this.scheduleEvict(false);
   }
 }

@@ -24,7 +24,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-05** — On-demand fetch + region merging + request coalescing; skeleton rows for unloaded.
 - [x] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
 - [x] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
-- [ ] **PR-08** — `jumpToId` end-to-end + dev input field.
+- [x] **PR-08** — `jumpToId` end-to-end + dev input field.
 - [ ] **PR-09** — Day grouping + sticky date header.
 - [ ] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
 - [ ] **PR-11** — Debounced search bar with results dropdown → click jumps.
@@ -313,4 +313,29 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     is fixed-width 12 px with `flex-shrink: 0`.
   - One lightweight adversarial review: GREEN with 1 minor
     (D01) fixed inline.
+
+- **PR-08** (2026-04-27) — `jumpToId(id)` end-to-end + dev input.
+  Files: `src/store/ChatStore.ts` (added `jumpToId`, `backendRef`),
+  `src/components/JumpToIdInput.{tsx,css}`, `src/App.tsx` (title bar
+  with input). 187 tests (+5).
+  Verification: `pnpm typecheck`, `pnpm test --run`, `pnpm build`
+  all exit 0; bundle ~213 KB.
+  Notes / surprises:
+  - **`jumpToId` order:** disposed-check → no-backend-check →
+    abortFetchesOutside(0,0) → await getById → second
+    disposed-check (after await) → insertRegion → setTopIndex →
+    scheduleEvict(false). The mid-await disposed check is
+    critical — without it, a fetch that races past dispose
+    would mutate a torn-down store.
+  - **Rejection propagates** without any partial mutation. Tests
+    verify `topIndex/pixelOffset/regionCount` stay unchanged on
+    `getById` rejection.
+  - **`abortFetchesOutside(0, 0)`** with degenerate keep-window
+    aborts ALL in-flight fetches — semantically clean, no
+    special-case method needed.
+  - **No post-jump explicit ensureRange** call: the 50+1+50 = 101
+    messages returned by `getById` cover the immediate viewport
+    plus overscan. Additional prefetch happens on next user input
+    via the existing scrollSettled flow.
+  - One lightweight adversarial review: GREEN, all 7 probes pass.
 

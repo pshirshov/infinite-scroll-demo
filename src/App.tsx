@@ -3,6 +3,7 @@ import { ChatStore } from "./store/ChatStore";
 import { MockBackend } from "./backend/MockBackend";
 import { ChatViewport } from "./components/ChatViewport";
 import { DebugBadge } from "./components/DebugBadge";
+import { JumpToIdInput } from "./components/JumpToIdInput";
 import "./styles.css";
 
 const N = 1_000_000;
@@ -33,7 +34,10 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="app">
-      <h1 className="app__title">scroll-demo</h1>
+      <div className="app__title-bar">
+        <h1 className="app__title">scroll-demo</h1>
+        <JumpToIdInput store={store} />
+      </div>
       <ChatViewport store={store} />
       <DebugBadge store={store} />
     </div>

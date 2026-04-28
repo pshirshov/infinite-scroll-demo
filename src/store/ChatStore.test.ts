@@ -371,6 +371,23 @@ function makeFakeBackend(
   return { getRange } as unknown as MockBackend;
 }
 
+type GetByIdResult = {
+  readonly message: Message;
+  readonly index: number;
+  readonly before: readonly Message[];
+  readonly after: readonly Message[];
+};
+
+function makeFakeBackendWithGetById(opts: {
+  getRange?: (start: number, end: number, signal?: AbortSignal) => Promise<readonly Message[]>;
+  getById: (id: string, signal?: AbortSignal) => Promise<GetByIdResult>;
+}): MockBackend {
+  const getRange =
+    opts.getRange ??
+    ((_start: number, _end: number): Promise<readonly Message[]> => Promise.resolve([]));
+  return { getRange, getById: opts.getById } as unknown as MockBackend;
+}
+
 describe("ChatStore.ensureRange", () => {
   it("is a no-op when no backend is configured", () => {
     const store = new ChatStore(DEFAULT_CONFIG);
@@ -535,5 +552,90 @@ describe("ChatStore.isLoadedOrInflight", () => {
     for (let i = 0; i < 5; i++) await Promise.resolve();
 
     expect(store.isLoadedOrInflight(25)).toBe(true);
+  });
+});
+
+// ---- jumpToId ----
+
+describe("ChatStore.jumpToId", () => {
+  it("inserts region and sets topIndex on valid id", async () => {
+    const targetIndex = 500;
+    const before = Array.from({ length: 3 }, (_, i) => makeMsg(targetIndex - 3 + i));
+    const after = Array.from({ length: 3 }, (_, i) => makeMsg(targetIndex + 1 + i));
+    const message = makeMsg(targetIndex);
+
+    const backend = makeFakeBackendWithGetById({
+      getById: (_id) =>
+        Promise.resolve({ message, index: targetIndex, before, after }),
+    });
+    const store = new ChatStore({ ...DEFAULT_CONFIG, backend, chunkSize: 100 });
+
+    await store.jumpToId("msg-00000500");
+
+    const snap = store.getSnapshot();
+    expect(snap.topIndex).toBe(targetIndex);
+    expect(snap.pixelOffset).toBe(0);
+    // region spans [targetIndex-3, targetIndex+4)
+    expect(snap.totalLoadedMessages).toBe(7);
+    expect(snap.regionCount).toBe(1);
+  });
+
+  it("propagates rejection when backend rejects; store state unchanged", async () => {
+    const backend = makeFakeBackendWithGetById({
+      getById: (_id) => Promise.reject(new Error("not found")),
+    });
+    const store = new ChatStore({ ...DEFAULT_CONFIG, backend, chunkSize: 100 });
+    store.setTopIndex(10, 5);
+
+    await expect(store.jumpToId("msg-00000999")).rejects.toThrow("not found");
+
+    const snap = store.getSnapshot();
+    // topIndex/pixelOffset unchanged
+    expect(snap.topIndex).toBe(10);
+    expect(snap.pixelOffset).toBe(5);
+    expect(snap.regionCount).toBe(0);
+  });
+
+  it("throws when no backend is configured", async () => {
+    const store = new ChatStore(DEFAULT_CONFIG); // no backend
+    await expect(store.jumpToId("msg-00000001")).rejects.toThrow("no backend configured");
+  });
+
+  it("is a no-op after dispose (resolves without throw)", async () => {
+    const backend = makeFakeBackendWithGetById({
+      getById: (_id) => Promise.resolve({ message: makeMsg(0), index: 0, before: [], after: [] }),
+    });
+    const store = new ChatStore({ ...DEFAULT_CONFIG, backend, chunkSize: 100 });
+    store.dispose();
+    // Should resolve, not throw
+    await expect(store.jumpToId("msg-00000001")).resolves.toBeUndefined();
+  });
+
+  it("aborts in-flight getRange fetches before issuing getById", async () => {
+    let rangeAborted = false;
+    // getRange never resolves so we can confirm abort
+    const getRange = (_start: number, _end: number, signal?: AbortSignal): Promise<readonly Message[]> =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          rangeAborted = true;
+          reject(new DOMException("aborted", "AbortError"));
+        });
+      });
+
+    const backend = makeFakeBackendWithGetById({
+      getRange,
+      getById: (_id) =>
+        Promise.resolve({ message: makeMsg(100), index: 100, before: [], after: [] }),
+    });
+    const store = new ChatStore({ ...DEFAULT_CONFIG, backend, chunkSize: 100 });
+
+    // Start a range fetch that will be in-flight
+    store.ensureRange(0, 50);
+    expect(store.getSnapshot().inflightCount).toBe(1);
+
+    // jumpToId should abort the range fetch then resolve
+    await store.jumpToId("msg-00000100");
+
+    expect(rangeAborted).toBe(true);
   });
 });
