@@ -299,6 +299,8 @@ export class ChatStore {
     const messages: Message[] = [...result.before, result.message, ...result.after];
     this.insertRegion({ startIndex, endIndex, messages });
     this.setTopIndex(result.index, 0);
-    this.scheduleEvict(false);
+    // Always protect the tail; jumping to a far ID still preserves the live
+    // tail region so a subsequent jump-to-latest is instant.
+    this.scheduleEvict(true);
   }
 }

@@ -127,14 +127,11 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
       store.ensureRange(start, clampedEnd);
       store.abortFetchesOutside(start, clampedEnd);
 
-      // Tail-anchored: last row's estimated bottom within TAIL_ANCHOR_THRESHOLD_PX of viewport bottom.
-      // + estimatedRowHeight converts distance-to-top to distance-to-bottom of the last row.
-      const distanceToLastRowBottom =
-        (current.totalCount - 1 - current.topIndex) * current.estimatedRowHeight +
-        current.estimatedRowHeight -
-        current.pixelOffset;
-      const tailAnchored = distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
-      store.scheduleEvict(tailAnchored);
+      // Always protect the tail region from eviction. The tail is a hot zone:
+      // live messages append there, "Jump to latest" lands there. Keeping it
+      // resident makes the demo feel snappy and avoids a fetch-roundtrip
+      // skeleton flash on every back-to-bottom navigation.
+      store.scheduleEvict(true);
     }, SCROLL_SETTLED_DELAY_MS);
   }, [store, viewportHeight]);
 
