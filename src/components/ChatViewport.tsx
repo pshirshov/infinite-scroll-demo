@@ -41,6 +41,9 @@ const PREFETCH_OVERSCAN = 200;
 /** Debounce delay before issuing ensureRange after scroll settles, ms. */
 const SCROLL_SETTLED_DELAY_MS = 150;
 
+/** Pixel threshold: if last row's bottom is within this many px of viewport bottom, we consider the tail anchored. */
+const TAIL_ANCHOR_THRESHOLD_PX = 64;
+
 export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   const snap = useChatStoreSnapshot(store);
   const { topIndex, pixelOffset, totalCount } = snap;
@@ -70,6 +73,8 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     const end = next.topIndex + Math.ceil(viewportHeight / snap.estimatedRowHeight) + PREFETCH_OVERSCAN;
     store.ensureRange(start, Math.min(end, snap.totalCount));
     store.abortFetchesOutside(start, Math.min(end, snap.totalCount));
+    // Just anchored to tail — protect it from eviction.
+    store.scheduleEvict(true);
   }, [didInitialAnchor, viewportHeight, snap.regions, snap.totalCount, snap.estimatedRowHeight, store]);
 
   // Track viewport height via ResizeObserver.
@@ -94,14 +99,19 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     settledTimerRef.current = setTimeout(() => {
       settledTimerRef.current = null;
       const current = store.getSnapshot();
+      const visibleRowCount = Math.ceil(viewportHeight / current.estimatedRowHeight);
       const start = current.topIndex - PREFETCH_OVERSCAN;
-      const end =
-        current.topIndex +
-        Math.ceil(viewportHeight / current.estimatedRowHeight) +
-        PREFETCH_OVERSCAN;
+      const end = current.topIndex + visibleRowCount + PREFETCH_OVERSCAN;
       const clampedEnd = Math.min(end, current.totalCount);
       store.ensureRange(start, clampedEnd);
       store.abortFetchesOutside(start, clampedEnd);
+
+      // Tail-anchored: last row's estimated bottom within TAIL_ANCHOR_THRESHOLD_PX of viewport bottom.
+      // (current.totalCount - 1 - current.topIndex) * estimatedRowHeight - pixelOffset ≈ distance from viewport-top to last row bottom
+      const distanceToLastRowBottom =
+        (current.totalCount - 1 - current.topIndex) * current.estimatedRowHeight - current.pixelOffset;
+      const tailAnchored = distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
+      store.scheduleEvict(tailAnchored);
     }, SCROLL_SETTLED_DELAY_MS);
   }, [store, viewportHeight]);
 

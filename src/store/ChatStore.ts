@@ -30,6 +30,8 @@ export interface ChatStoreConfig {
   readonly prefetchOverscan?: number;
 }
 
+const EVICT_DEBOUNCE_MS = 750;
+
 export class ChatStore {
   private regions: readonly Region[] = [];
   private readonly heights: Map<number, number> = new Map();
@@ -41,6 +43,8 @@ export class ChatStore {
   private readonly listeners: Set<() => void> = new Set();
   private cachedSnapshot: ChatStoreSnapshot | null = null;
   private readonly coordinator: FetchCoordinator | null;
+  private evictTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed: boolean = false;
 
   constructor(config: ChatStoreConfig) {
     this.totalCount = config.totalCount;
@@ -156,7 +160,35 @@ export class ChatStore {
     return this.coordinator.inflightChunks().some((c) => c.start <= index && index < c.end);
   }
 
+  /**
+   * Debounced eviction. After EVICT_DEBOUNCE_MS without another call,
+   * runs `this.evict({ protectTail })`. Subsequent calls cancel and
+   * re-arm the timer. Idempotent on tear-down.
+   */
+  scheduleEvict(protectTail: boolean): void {
+    if (this.disposed) return;
+    if (this.evictTimer !== null) clearTimeout(this.evictTimer);
+    this.evictTimer = setTimeout(() => {
+      this.evictTimer = null;
+      this.evict({ protectTail });
+    }, EVICT_DEBOUNCE_MS);
+  }
+
+  /** @internal For tests: forces the pending eviction to run immediately. */
+  flushPendingEvictionForTest(): void {
+    if (this.evictTimer !== null) {
+      clearTimeout(this.evictTimer);
+      this.evictTimer = null;
+      this.evict({ protectTail: false });
+    }
+  }
+
   dispose(): void {
+    this.disposed = true;
+    if (this.evictTimer !== null) {
+      clearTimeout(this.evictTimer);
+      this.evictTimer = null;
+    }
     this.coordinator?.dispose();
     this.listeners.clear();
   }

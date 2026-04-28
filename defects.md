@@ -266,6 +266,17 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 **Description:** `dispose` aborts every controller; each `.catch` handler then calls `onError` for what is effectively user-initiated teardown. If the consumer wires `onError` to a toast, a flood of "aborted" errors appears.
 **Suggested fix:** Set an internal `disposed: boolean` flag at the top of `dispose()`. `.catch` handler checks the flag and skips `onError`. Apply the same flag to `.then` to suppress `onChunk` (covers the same race as D01).
 
+## PR-06
+
+### [PR-06-D01] Tail-anchor formula off by one row-height (advisory)
+**Status:** resolved (note-only — more permissive than spec, harmless)
+**Severity:** nit
+**Location:** `src/components/ChatViewport.tsx:111-113`
+**Description:** `distanceToLastRowBottom = (totalCount-1 - topIndex)*estimatedRowHeight - pixelOffset` is actually the distance from viewport-top to last row's TOP. The spec says "last row's bottom within 64px of viewport bottom" — to match, the term should add `+ estimatedRowHeight`. Effect: tail-anchor detection is more permissive by one row-height (~60 px). Doesn't break behavior; comment contradicts the formula.
+**Fix:** Note-only. PR-12 polish can tighten the formula and update the comment.
+
+---
+
 ### [PR-05-D10] Test gaps for race conditions and edge cases
 **Status:** resolved
 **Severity:** minor

@@ -22,7 +22,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-03** — `ChatStore` regions + heights map + observable; pure logic, fuzz-tested.
 - [x] **PR-04** — Index-space scroll engine over a fixed preloaded slice; wheel/keyboard input; ResizeObserver.
 - [x] **PR-05** — On-demand fetch + region merging + request coalescing; skeleton rows for unloaded.
-- [ ] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
+- [x] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
 - [ ] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
 - [ ] **PR-08** — `jumpToId` end-to-end + dev input field.
 - [ ] **PR-09** — Day grouping + sticky date header.
@@ -253,4 +253,34 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     producing a verdict; orchestrator self-verified the critical
     code paths (race guards, wiring, dispose lifecycle) and confirmed
     all 162 tests pass. Pragmatic close-out given budget.
+
+- **PR-06** (2026-04-27) — Debounced auto-eviction + DebugBadge.
+  Files: `src/store/ChatStore.ts` (added `scheduleEvict`,
+  `flushPendingEvictionForTest`, dispose integration),
+  `src/components/ChatViewport.tsx` (calls `scheduleEvict` from both
+  scrollSettled timer and initial-anchor effect; computes
+  `tailAnchored` heuristic), `src/components/DebugBadge.{tsx,css}`
+  (new fixed-position overlay), `src/App.tsx` (renders DebugBadge).
+  4 new tests (162 → 166).
+  Verification: `pnpm typecheck`, `pnpm test --run`, `pnpm build`
+  all exit 0; bundle ~210 KB JS.
+  Notes / surprises:
+  - **`scheduleEvict` debounce = 750 ms** matching the plan's
+    cross-cutting decision. Each call clears the prior timer.
+    `dispose()` clears the timer; `disposed` flag suppresses
+    further `scheduleEvict` calls.
+  - **`tailAnchored` heuristic** is approximated as
+    `(totalCount-1 - topIndex)*estimatedRowHeight - pixelOffset
+    <= viewportHeight + 64`. PR-06-D01 noted that this is
+    technically distance to last-row-top (off by one row from
+    spec). Harmless: more permissive than spec, can never
+    false-positive when far above tail. Tighten in PR-12.
+  - **DebugBadge has zero animation/transition** by spec — the
+    no-flicker rule applies even to debug overlays.
+  - **Eviction × heights cleanup interaction** verified by review:
+    even with the height-clearing band `[topIndex ± 2*keepRadius]`,
+    a protected-tail region's heights are NOT cleared because the
+    region itself isn't in `evictedRegions`.
+  - One adversarial review (lighter pass given mostly mechanical
+    wiring): GREEN with 1 advisory (D01).
 

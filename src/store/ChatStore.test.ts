@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ChatStore } from "./ChatStore";
 import type { ChatStoreConfig } from "./ChatStore";
 import type { Region } from "./regions";
@@ -414,6 +414,89 @@ describe("ChatStore.ensureRange", () => {
     store.ensureRange(-50, 150); // should clamp to [0, 100)
 
     expect(getRange).toHaveBeenCalledWith(0, 100, expect.anything());
+  });
+});
+
+// ---- scheduleEvict ----
+
+describe("ChatStore.scheduleEvict", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("debounces: multiple rapid calls result in exactly one evict after 750 ms", () => {
+    const store = new ChatStore({ ...DEFAULT_CONFIG, keepRadius: 50 });
+    store.insertRegion(makeRegion(0, 10));
+    store.insertRegion(makeRegion(900, 910));
+
+    const listener = vi.fn();
+    store.subscribe(listener);
+    listener.mockClear();
+
+    // Rapid-fire three times — only one evict should run
+    store.scheduleEvict(false);
+    store.scheduleEvict(false);
+    store.scheduleEvict(false);
+
+    vi.advanceTimersByTime(749);
+    expect(listener).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    // evict fires once — regions changes from 2 to 1
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().regionCount).toBe(1);
+  });
+
+  it("each new call resets the 750 ms window", () => {
+    const store = new ChatStore({ ...DEFAULT_CONFIG, keepRadius: 50 });
+    store.insertRegion(makeRegion(0, 10));
+    store.insertRegion(makeRegion(900, 910));
+
+    const listener = vi.fn();
+    store.subscribe(listener);
+    listener.mockClear();
+
+    store.scheduleEvict(false);
+    vi.advanceTimersByTime(700);
+    // Re-arm before it fires
+    store.scheduleEvict(false);
+    vi.advanceTimersByTime(749);
+    // Should NOT have fired yet (re-armed at t=700, needs another 750 from there)
+    expect(listener).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("scheduleEvict after dispose is a no-op", () => {
+    const store = new ChatStore({ ...DEFAULT_CONFIG, keepRadius: 50 });
+    store.insertRegion(makeRegion(0, 10));
+    store.insertRegion(makeRegion(900, 910));
+
+    store.dispose();
+    store.scheduleEvict(false);
+
+    vi.advanceTimersByTime(1000);
+    // No crash; regions unchanged (store is disposed, listeners cleared)
+    // We can't check regionCount via subscription but evict would have mutated regions
+    expect(store.getSnapshot().regionCount).toBe(2);
+  });
+});
+
+// ---- I-3 regression: snapshot identity stable across no-op setHeight ----
+
+describe("ChatStore I-3 regression: setHeight no-op preserves snapshot identity", () => {
+  it("snapshot reference is unchanged when setHeight is called with the same value twice", () => {
+    const store = new ChatStore(DEFAULT_CONFIG);
+    store.setHeight(5, 80);
+    const s1 = store.getSnapshot();
+    // Second call with identical value — must be a no-op
+    store.setHeight(5, 80);
+    const s2 = store.getSnapshot();
+    expect(s1).toBe(s2);
   });
 });
 
