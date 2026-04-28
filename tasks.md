@@ -10,7 +10,7 @@ Status: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked
 ## Milestones (high-level)
 
 - [x] **M1** — Index-space-scrolled chat demo: ChatStore + ChatViewport + custom scrollbar + mock backend + extras (search, day headers, live tail, jump-to-latest), all six functional requirements met at N = 5M.
-- [~] **M2** — Playwright environment + bug fixes from user testing: empty bodies after scrollbar drag (FR-2/3 regression), text-selection spans across rows (FR DOM-order issue).
+- [x] **M2** — Playwright environment + bug fixes from user testing: empty bodies after scrollbar drag (FR-2/3 regression), text-selection spans across rows (FR DOM-order issue).
 
 ---
 
@@ -39,7 +39,7 @@ Detail in `./docs/drafts/20260427-2304-m2-plan.md`.
 
 - [x] **PR-13** — Playwright environment + smoke test (Nix + pnpm + chromium-only headless).
 - [x] **PR-14** — Selection bug: DOM-order fix in `ChatViewport.tsx` layout pass + Playwright regression test.
-- [ ] **PR-15** — Empty-bodies after scrollbar drag: reproduce in Playwright first, diagnose, fix.
+- [x] **PR-15** — Empty-bodies after scrollbar drag: reproduce in Playwright first, diagnose, fix.
 
 ---
 
@@ -267,6 +267,52 @@ Detail in `./docs/drafts/20260427-2304-m2-plan.md`.
     `.chat-viewport__rows` MUST be in `topPx`-ascending order.
     Future layout-pass changes must preserve this.
   - Recorded as PR-14-D01 (major, user-reported).
+
+- **PR-15** (2026-04-27) — Empty-bodies-after-scrollbar-drag fix.
+  Diagnosis-first; investigation revealed React StrictMode interacted
+  with PR-05's dispose lifecycle in a subtle, undertested way.
+  Files: `e2e/jump-then-render.spec.ts` (new repro test),
+  `src/App.tsx` (resource-creation pattern fix). 201 unit tests + 4
+  e2e tests (smoke + 2 selection + jump-then-render) all green.
+  Verification: gates exit 0; bundle 217 KB JS.
+  Notes / surprises (CRITICAL READING for future PRs):
+  - **Bug:** PR-05 added `useEffect(() => () => store.dispose(),
+    [store])` to clean up the FetchCoordinator on unmount. Resources
+    were created via `useState(() => new ChatStore(...))` whose
+    initializer runs ONCE per component instance. React 18
+    `<StrictMode>` simulates an unmount in dev: mount → cleanup →
+    re-mount. The cleanup disposed store-1. The remount **reused the
+    same disposed store-1** because `useState` state survives the
+    StrictMode cycle. Every subsequent prefetch went through the
+    coordinator's `disposed` race-guard (PR-05-D01) and was silently
+    dropped. Smoke test passed because the initial `getLatest`
+    insert goes through `insertRegion` directly, not through the
+    coordinator. Only post-drag prefetches were silenced.
+  - **PR-05's round-1 review explicitly flagged the StrictMode
+    interaction** but mis-analyzed: "useState initializer only runs
+    once per mount instance, so the second mount creates a fresh
+    store" — INCORRECT. State is preserved; initializer doesn't
+    re-run on remount.
+  - **Fix:** Move resource construction from `useState` initializer
+    into a dedicated `useEffect` whose cleanup disposes. The
+    mount→cleanup→mount cycle now creates fresh resources.
+    Children render `null` until `resources !== null`
+    (instantaneous). Pattern documented in code.
+  - **Why M1 unit tests didn't catch it:** unit tests instantiate
+    stores directly, never via React lifecycle. StrictMode's
+    double-mount pattern is invisible to pure unit tests. The e2e
+    harness — exercising the real React tree — caught it.
+  - **Pattern for future code:** all imperative resources whose
+    lifetime tracks the React tree MUST be created in an effect,
+    NEVER via `useState(() => new Resource())` when paired with a
+    dispose cleanup. Codify in CONTRIBUTING if M3+ adds more such
+    resources.
+  - Repro-first discipline applied: failing repro test landed
+    BEFORE the fix; failure was timeout on
+    `expect.poll(skeletons === 0)` — skeletons stuck because no
+    chunks ever resolved. Diagnostic logs traced the suppression
+    to `disposed === true`.
+  - Recorded as PR-15-D01 (major).
 
 - **PR-05** (2026-04-27) — On-demand fetch coordinator + skeleton rows.
   Files: `src/store/fetchCoordinator.{ts,test.ts}`, `src/store/

@@ -270,6 +270,32 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 
 ## PR-14
 
+## PR-15
+
+### [PR-15-D01] Empty bodies after scrollbar drag — disposed store reused across StrictMode double-mount
+**Status:** resolved
+**Severity:** major (user-reported during M1 manual testing)
+**Location:** `src/App.tsx` (resource creation pattern)
+**Description:** User drags scrollbar from bottom to ~50%; visible message bodies stay empty despite skeletons disappearing. Root cause: PR-05 introduced `useEffect(() => () => store.dispose(), [store])` to clean up the FetchCoordinator on unmount. But React 18 `<StrictMode>` (enabled in `src/main.tsx`) intentionally simulates an unmount in dev mode, running every effect's cleanup ONCE before re-mounting. The resources were created via `useState(() => new ChatStore(...))` whose initializer runs only ONCE per component instance — the state survives the StrictMode mount→cleanup→mount cycle. So:
+1. Mount-1: store-1 is created (via useState initializer), effects mount.
+2. StrictMode cleanup: dispose-effect fires, `store-1.dispose()` sets `disposed=true`.
+3. Mount-2: useState initializer does NOT re-run; component reuses store-1 (now disposed).
+4. Every subsequent `coordinator.ensureRange` resolution checks `this.disposed` (PR-05's race-guard) and silently drops `onChunk`.
+
+The smoke test passed because the initial `getLatest(200)` → `store.insertRegion` doesn't go through the coordinator. Only post-drag prefetches were silenced.
+
+PR-05's round-1 review actually flagged this concern but mis-analyzed it: "useState initializer only runs once per mount instance, so the second mount creates a fresh store" — INCORRECT under StrictMode (state is preserved, initializer doesn't re-run on remount).
+
+**Fix:** Move resource construction from `useState(() => ...)` initializer into a dedicated `useEffect` whose cleanup disposes them. The mount → cleanup → mount cycle now creates fresh resources on the second mount. Children render `null` until `resources !== null` (one render cycle, instantaneous in practice). All other effects (boot fetch, subscribeNew) gate on `resources` being non-null. Pattern documented in a comment so future contributors don't re-introduce the bug.
+
+**Why M1 unit tests didn't catch it:** Unit tests instantiate `ChatStore` and `FetchCoordinator` directly, never through the React lifecycle. The StrictMode double-mount pattern is invisible to pure unit tests. Caught by the e2e harness exercising the real React tree.
+
+**Pattern for future PRs:** All imperative resources whose lifetime tracks the React tree MUST be created in an effect, NEVER via `useState(() => new Resource())` when paired with a dispose cleanup. Worth codifying in CONTRIBUTING if M3+ adds more such resources.
+
+---
+
+## PR-14
+
 ### [PR-14-D01] Drag-selecting text inside one message extended selection across unrelated rows
 **Status:** resolved
 **Severity:** major (user-reported during M1 manual testing)

@@ -9,17 +9,42 @@ import "./styles.css";
 
 const N = 5_000_000;
 
-export function App(): React.JSX.Element {
-  const [backend] = useState(() => new MockBackend({ totalCount: N, seed: 42 }));
-  const [store] = useState(() => new ChatStore({
+interface Resources {
+  readonly backend: MockBackend;
+  readonly store: ChatStore;
+}
+
+// Construct backend+store INSIDE an effect (not via useState initializer) so
+// that creation and disposal are paired symmetrically with the effect's
+// lifecycle. React 18's <StrictMode> intentionally simulates an unmount in dev,
+// running every effect's cleanup once before re-mounting; if the resource is
+// created via `useState(() => new Resource())` and disposed in a cleanup, the
+// remounted component reuses the SAME (now-disposed) resource — quietly
+// breaking any subsequent fetches via the disposed coordinator.
+function createResources(): Resources {
+  const backend = new MockBackend({ totalCount: N, seed: 42 });
+  const store = new ChatStore({
     totalCount: N,
     estimatedRowHeight: 60,
     keepRadius: 500,
     backend,
     chunkSize: 100,
-  }));
+  });
+  return { backend, store };
+}
+
+export function App(): React.JSX.Element | null {
+  const [resources, setResources] = useState<Resources | null>(null);
 
   useEffect(() => {
+    const r = createResources();
+    setResources(r);
+    return () => r.store.dispose();
+  }, []);
+
+  useEffect(() => {
+    if (resources === null) return;
+    const { backend, store } = resources;
     let cancelled = false;
     backend.getLatest(200).then(({ messages, startIndex }) => {
       if (cancelled) return;
@@ -29,16 +54,19 @@ export function App(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [backend, store]);
+  }, [resources]);
 
   useEffect(() => {
+    if (resources === null) return;
+    const { backend, store } = resources;
     const unsub = backend.subscribeNew((event) => {
       store.handleLiveMessage(event);
     });
     return unsub;
-  }, [backend, store]);
+  }, [resources]);
 
-  useEffect(() => () => store.dispose(), [store]);
+  if (resources === null) return null;
+  const { backend, store } = resources;
 
   return (
     <div className="app">
