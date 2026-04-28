@@ -11,7 +11,7 @@ Status: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked
 
 - [x] **M1** — Index-space-scrolled chat demo: ChatStore + ChatViewport + custom scrollbar + mock backend + extras (search, day headers, live tail, jump-to-latest), all six functional requirements met at N = 5M.
 - [x] **M2** — Playwright environment + bug fixes from user testing: empty bodies after scrollbar drag (FR-2/3 regression), text-selection spans across rows (FR DOM-order issue).
-- [~] **M3** — Three more user-reported bugs: code-block selection, initial-anchor drift / auto-stay-at-bottom, tail-region pinning (don't evict).
+- [x] **M3** — Three more user-reported bugs: code-block selection, initial-anchor drift / auto-stay-at-bottom, tail-region pinning (don't evict).
 
 ---
 
@@ -48,7 +48,7 @@ Detail in `./docs/drafts/20260427-2304-m2-plan.md`.
 
 - [x] **PR-16** — Always-pin the tail region (`protectTail: true` unconditionally). Trivial fix.
 - [x] **PR-17** — Code-block selection bug: reproduce in Playwright, diagnose, fix.
-- [ ] **PR-18** — Auto-stay-at-bottom: introduce `followTail` intent. When set, every snapshot change re-snaps so the last row sits at viewport bottom. Initial anchor and JumpToLatest set it; user scrolling up clears it.
+- [x] **PR-18** — Auto-stay-at-bottom: introduce `followTail` intent. When set, every snapshot change re-snaps so the last row sits at viewport bottom. Initial anchor and JumpToLatest set it; user scrolling up clears it.
 
 ---
 

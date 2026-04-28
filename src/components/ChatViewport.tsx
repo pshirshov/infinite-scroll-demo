@@ -55,6 +55,25 @@ const SCROLL_SETTLED_DELAY_MS = 150;
 /** Pixel threshold: if last row's bottom is within this many px of viewport bottom, we consider the tail anchored. */
 const TAIL_ANCHOR_THRESHOLD_PX = 64;
 
+/**
+ * True iff the given scroll state has the last row visible within
+ * TAIL_ANCHOR_THRESHOLD_PX of the viewport bottom under estimated heights.
+ * Used to decide whether the user's intent is "follow tail" after each input.
+ */
+function isAtBottom(
+  state: { readonly topIndex: number; readonly pixelOffset: number },
+  totalCount: number,
+  viewportHeight: number,
+  estimatedRowHeight: number,
+): boolean {
+  if (totalCount === 0) return true;
+  const distanceToLastRowBottom =
+    (totalCount - 1 - state.topIndex) * estimatedRowHeight +
+    estimatedRowHeight -
+    state.pixelOffset;
+  return distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
+}
+
 export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   const snap = useChatStoreSnapshot(store);
   const { topIndex, pixelOffset, totalCount } = snap;
@@ -64,14 +83,15 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   const [didInitialAnchor, setDidInitialAnchor] = useState(false);
   const settledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Derived: tail-anchored when last row's estimated bottom is within threshold of viewport bottom.
-  // + estimatedRowHeight converts distance-to-top to distance-to-bottom of the last row.
-  const distanceToLastRowBottom =
-    (totalCount - 1 - topIndex) * snap.estimatedRowHeight + snap.estimatedRowHeight - pixelOffset;
-  const tailAnchored =
-    totalCount === 0 ||
-    viewportHeight === null ||
-    distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
+  // followTail: explicit user intent to "stay at bottom". Distinct from the
+  // derived `is currently at bottom` predicate because we want to keep
+  // re-snapping as content reflows (heights resolving wider than the estimate,
+  // or live messages appending). It's true initially and toggled by each input
+  // handler based on whether the post-state is at the bottom — i.e. user
+  // scrolling up clears it; user scrolling down to the very bottom restores
+  // it. A dedicated effect re-snaps whenever followTail is true and the
+  // current state is no longer exactly at the bottom.
+  const [followTail, setFollowTail] = useState(true);
 
   // One-shot: once the viewport has a height and the tail region is loaded, snap to the live tail.
   useEffect(() => {
@@ -88,6 +108,9 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     );
     store.setTopIndex(next.topIndex, next.pixelOffset);
     setDidInitialAnchor(true);
+    // Establish followTail=true so the auto-follow effect maintains the
+    // bottom anchor as heights resolve and live messages append.
+    setFollowTail(true);
     // Prefetch around the post-anchor position with correct topIndex.
     const start = next.topIndex - PREFETCH_OVERSCAN;
     const end = next.topIndex + Math.ceil(viewportHeight / snap.estimatedRowHeight) + PREFETCH_OVERSCAN;
@@ -144,34 +167,44 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     };
   }, []);
 
-  // Snap to tail and clear unseen — shared by the pill click and the follow effect.
-  const snapToTail = useCallback(() => {
+  // Pill click: jump to tail and resume auto-follow. Setting followTail=true
+  // makes the auto-follow effect take over from here (it re-snaps idempotently
+  // once the state is already at the bottom).
+  const onJumpToLatest = useCallback(() => {
+    setFollowTail(true);
+  }, []);
+
+  // Auto-follow effect. Runs on every snapshot or viewport-height change.
+  // When followTail is set, computes the desired bottom-anchored state and
+  // snaps if the current state differs. This handles BOTH:
+  //   (a) Live messages arriving (totalCount + region grow → desired position
+  //       moves down → snap).
+  //   (b) Heights resolving taller than the estimate (last row drifts past the
+  //       viewport bottom → desired position adjusts → snap).
+  // Idempotence: if next equals current, no setTopIndex; effect terminates.
+  useEffect(() => {
+    if (!followTail) return;
     if (viewportHeight === null) return;
-    const current = store.getSnapshot();
+    if (snap.totalCount === 0) return;
     const next = applyScrollDelta(
-      { topIndex: current.totalCount - 1, pixelOffset: 0 },
+      { topIndex: snap.totalCount - 1, pixelOffset: 0 },
       0,
-      current.totalCount,
+      snap.totalCount,
       store,
       viewportHeight,
     );
-    store.setTopIndex(next.topIndex, next.pixelOffset);
-    store.clearUnseen();
-    scheduleEnsureRange();
-  }, [store, viewportHeight, scheduleEnsureRange]);
-
-  // Pill click: jump to tail and resume auto-follow.
-  const onJumpToLatest = useCallback(() => {
-    snapToTail();
-  }, [snapToTail]);
-
-  // Auto-follow effect: when tail-anchored and there are unseen messages, snap forward.
-  // After snap, unseenCount === 0 so the effect won't re-fire.
-  useEffect(() => {
-    if (!tailAnchored) return;
-    if (snap.unseenCount === 0) return;
-    snapToTail();
-  }, [tailAnchored, snap.unseenCount, snap.totalCount, snapToTail]);
+    const needsSnap =
+      next.topIndex !== snap.topIndex || next.pixelOffset !== snap.pixelOffset;
+    if (needsSnap) {
+      store.setTopIndex(next.topIndex, next.pixelOffset);
+      scheduleEnsureRange();
+    }
+    // While following, unseen counts are immediately consumed — the user is
+    // already viewing them as they arrive.
+    if (snap.unseenCount > 0) {
+      store.clearUnseen();
+    }
+  }, [followTail, snap, viewportHeight, store, scheduleEnsureRange]);
 
   // Wheel handler — passive:false so we can prevent default native scroll.
   useEffect(() => {
@@ -193,6 +226,15 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         store.setTopIndex(next.topIndex, next.pixelOffset);
         scheduleEnsureRange();
       }
+      // Directional intent: any upward scroll releases the follow regardless
+      // of whether the post-state is technically still within the at-bottom
+      // threshold. Downward scroll re-engages follow if (and only if) the
+      // post-state truly sits at the bottom.
+      if (dyPx < 0) {
+        setFollowTail(false);
+      } else {
+        setFollowTail(isAtBottom(next, current.totalCount, viewportHeight, current.estimatedRowHeight));
+      }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -205,18 +247,23 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
       let dyPx: number | null = null;
       const current = store.getSnapshot();
 
+      // Track directional intent so the post-input followTail update can
+      // always release on upward motion regardless of threshold proximity.
+      let isUpward = false;
       if (e.key === "ArrowDown") {
         e.preventDefault();
         dyPx = KEYBOARD_SCROLL_PX;
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         dyPx = -KEYBOARD_SCROLL_PX;
+        isUpward = true;
       } else if (e.key === "PageDown") {
         e.preventDefault();
         dyPx = viewportHeight - PAGE_SCROLL_OVERLAP_PX;
       } else if (e.key === "PageUp") {
         e.preventDefault();
         dyPx = -(viewportHeight - PAGE_SCROLL_OVERLAP_PX);
+        isUpward = true;
       } else if (e.key === "Home") {
         e.preventDefault();
         const next = applyScrollDelta(
@@ -228,19 +275,13 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         );
         store.setTopIndex(next.topIndex, next.pixelOffset);
         scheduleEnsureRange();
+        setFollowTail(false);
         return;
       } else if (e.key === "End") {
         e.preventDefault();
-        // Set to last index at 0 offset; upper-bound clamp in applyScrollDelta will settle it.
-        const next = applyScrollDelta(
-          { topIndex: current.totalCount - 1, pixelOffset: 0 },
-          0,
-          current.totalCount,
-          store,
-          viewportHeight,
-        );
-        store.setTopIndex(next.topIndex, next.pixelOffset);
-        scheduleEnsureRange();
+        // End re-engages tail-follow; the auto-follow effect will perform the
+        // actual snap idempotently.
+        setFollowTail(true);
         return;
       }
 
@@ -256,18 +297,37 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
           store.setTopIndex(next.topIndex, next.pixelOffset);
           scheduleEnsureRange();
         }
+        if (isUpward) {
+          setFollowTail(false);
+        } else {
+          setFollowTail(isAtBottom(next, current.totalCount, viewportHeight, current.estimatedRowHeight));
+        }
       }
     },
     [store, viewportHeight, scheduleEnsureRange],
   );
 
   // Scrollbar jump: set topIndex directly, then schedule a fetch+evict cycle.
+  // The auto-follow effect re-evaluates after the snapshot updates: if the
+  // user happened to drag the thumb to the very bottom, followTail flips back
+  // on through the post-input check below.
   const onScrollbarJump = useCallback(
     (target: number) => {
       store.setTopIndex(target, 0);
       scheduleEnsureRange();
+      if (viewportHeight !== null) {
+        const current = store.getSnapshot();
+        setFollowTail(
+          isAtBottom(
+            { topIndex: target, pixelOffset: 0 },
+            current.totalCount,
+            viewportHeight,
+            current.estimatedRowHeight,
+          ),
+        );
+      }
     },
-    [store, scheduleEnsureRange],
+    [store, viewportHeight, scheduleEnsureRange],
   );
 
   // Stable callback for MessageRow's ResizeObserver.
@@ -431,7 +491,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         onJump={onScrollbarJump}
       />
       <JumpToLatest
-        visible={!tailAnchored}
+        visible={!followTail}
         unseenCount={snap.unseenCount}
         onClick={onJumpToLatest}
       />
