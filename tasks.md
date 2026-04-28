@@ -27,7 +27,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-08** — `jumpToId` end-to-end + dev input field.
 - [x] **PR-09** — Day grouping + sticky date header.
 - [x] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
-- [ ] **PR-11** — Debounced search bar with results dropdown → click jumps.
+- [x] **PR-11** — Debounced search bar with results dropdown → click jumps.
 - [ ] **PR-12** — Polish, README, default N=5M, full scenario sweep.
 
 ---
@@ -395,4 +395,29 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     unsubscribes; second mount re-subscribes; backend's interval
     starts/stops with subscriber count per `subscribeNew` contract.
   - One lightweight adversarial review: GREEN, no defects.
+
+- **PR-11** (2026-04-27) — Debounced search bar + results dropdown.
+  Files: `src/components/SearchBar.{tsx,css}`,
+  `src/components/SearchResults.tsx`, `src/App.tsx` (mounts SearchBar
+  in title bar). Test count unchanged (201) — debounce/abort logic is
+  inline in the component; manual test only.
+  Verification: gates exit 0; bundle ~217 KB.
+  Notes / surprises:
+  - **Per-keystroke AbortController**: each render's `useEffect`
+    creates a fresh controller + timer. Cleanup BOTH clears the
+    timer AND aborts the controller. `.then` and `.catch` guard on
+    `signal.aborted` so stale fetches don't write to state.
+    Identical pattern to the FetchCoordinator race-fix from PR-05.
+  - **Empty-query short-circuit** clears state without scheduling a
+    fetch.
+  - **Click on result** silently catches `jumpToId` rejection (the
+    rationale comment is slightly misleading — JumpToIdInput
+    surfaces its own errors, but the search dropdown does not).
+    Acceptable per spec; could surface errors in PR-12 polish.
+  - **No outside-click handler** on the dropdown — Escape or click
+    on a result closes it. Acceptable per spec.
+  - **No CSS animation** on the search UI — no `@keyframes`,
+    `animation`, or `transition` per the no-flicker rule.
+  - One lightweight adversarial review: GREEN, no defects raised
+    (2 acceptable notes).
 
