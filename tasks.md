@@ -10,6 +10,7 @@ Status: `[ ]` planned · `[~]` in progress · `[x]` done · `[!]` blocked
 ## Milestones (high-level)
 
 - [x] **M1** — Index-space-scrolled chat demo: ChatStore + ChatViewport + custom scrollbar + mock backend + extras (search, day headers, live tail, jump-to-latest), all six functional requirements met at N = 5M.
+- [~] **M2** — Playwright environment + bug fixes from user testing: empty bodies after scrollbar drag (FR-2/3 regression), text-selection spans across rows (FR DOM-order issue).
 
 ---
 
@@ -32,6 +33,16 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 
 ---
 
+## Milestone 2 — PR breakdown
+
+Detail in `./docs/drafts/20260427-2304-m2-plan.md`.
+
+- [x] **PR-13** — Playwright environment + smoke test (Nix + pnpm + chromium-only headless).
+- [ ] **PR-14** — Selection bug: DOM-order fix in `ChatViewport.tsx` layout pass + Playwright regression test.
+- [ ] **PR-15** — Empty-bodies after scrollbar drag: reproduce in Playwright first, diagnose, fix.
+
+---
+
 ## Cross-cutting architectural notes (locked)
 
 - [x] **Library versions** — React 19.x, TS 5.9.x strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), Vite 6.x, Vitest 2.x, jsdom 25.x, @testing-library/react 16.x. No UI framework. No virtualization library.
@@ -48,6 +59,8 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **Tail-anchor threshold** — last row's bottom within 64 px of viewport bottom counts as "anchored to tail". (Was Q-2 in plan.)
 - [x] **Eviction on jumpToId** — debounced (same path as scroll-settled), not immediate. Recommended by planner; accepts brief retention of departure region in exchange for cheap back-jump. (Was Q-3 in plan.)
 - [x] **No backwards compat** — internal-only code; refactor freely between PRs.
+- [x] **M2 e2e harness** — Playwright via nix-provided `playwright-driver.browsers`. Chromium-only headless. Tests in `/e2e/*.spec.ts`. Webserver runs `pnpm dev`. Pinned `@playwright/test` matches `nixpkgs#playwright-driver.version`.
+- [x] **M2 layout-pass invariant I-7 (will be added in PR-14)** — DOM children of `.chat-viewport__rows` are ordered by `topPx` ascending (via explicit sort in the layout pass). Required for correct text selection.
 
 ---
 
@@ -205,6 +218,31 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
   - Two adversarial review rounds: round 1 surfaced 7 defects (D01
     major, D02 minor, D03/D04 minor/nit, D05/D06 nits, D07 deferred);
     round 2 GREEN with 2 new non-blocking nits (D08/D09 deferred).
+
+- **PR-13** (2026-04-27) — Playwright e2e harness through Nix.
+  Files: `flake.nix` (added `playwright-driver.browsers` + shellHook
+  exports), `package.json` (`@playwright/test@1.58.2` + `e2e` /
+  `e2e:headed` scripts), `playwright.config.ts` (chromium-only
+  headless, webServer auto-starts pnpm dev), `e2e/smoke.spec.ts` (one
+  test asserting visible non-empty `.chat-message__body`),
+  `vite.config.ts` (added `e2e/**` to Vitest excludes), `.gitignore`,
+  `README.md` (added e2e subsection).
+  Verification: `pnpm typecheck`, `pnpm test --run` (201 unit tests),
+  `pnpm build`, `pnpm e2e` (1 spec, ~28 s) all exit 0.
+  Notes / surprises:
+  - **Playwright version pinned to 1.58.2** matching
+    `nixpkgs#playwright-driver.version`. No `nix flake update`
+    needed — alignment was already exact in current nixpkgs.
+  - **`PLAYWRIGHT_BROWSERS_PATH` resolves under `/nix/store/...`** —
+    no `npx playwright install` required. Sandbox-friendly.
+  - **Vitest picked up the e2e spec by default** because
+    `@playwright/test`'s `test` symbol clashes with Vitest's at import
+    time, causing a file-level error. Fixed by adding `e2e/**` to the
+    pre-existing Vitest `exclude` array.
+  - **`flake.nix` requires `git add`** for nix to see modifications —
+    same gotcha as PR-01.
+  - No adversarial review (mechanical environment setup); the smoke
+    test passing IS the verification.
 
 - **PR-05** (2026-04-27) — On-demand fetch coordinator + skeleton rows.
   Files: `src/store/fetchCoordinator.{ts,test.ts}`, `src/store/

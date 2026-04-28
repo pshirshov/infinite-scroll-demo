@@ -9,3 +9,6 @@ coverage/
 *.tsbuildinfo
 dist-node/
 .pnpm-store/
+/playwright-report
+/test-results
+/.playwright

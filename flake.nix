@@ -17,12 +17,15 @@
             pnpm
             typescript
             typescript-language-server
+            playwright-driver.browsers
           ];
 
           shellHook = ''
             echo "scroll-demo dev shell"
             echo "node:  $(node --version)"
             echo "pnpm:  $(pnpm --version)"
+            export PLAYWRIGHT_BROWSERS_PATH=${pkgs.playwright-driver.browsers}
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=true
           '';
         };
       });

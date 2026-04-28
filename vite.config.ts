@@ -9,6 +9,6 @@ export default defineConfig({
     // direnv mirrors flake inputs into .direnv/, including a snapshot of this
     // repo whose paths point into the nix store; vitest's default glob would
     // pick those up as duplicate test files that no longer exist on disk.
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.direnv/**", "**/dist-node/**"],
+    exclude: ["e2e/**", "**/node_modules/**", "**/dist/**", "**/.direnv/**", "**/dist-node/**"],
   },
 });

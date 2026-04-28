@@ -70,6 +70,16 @@ nix develop --command pnpm build        # ~217 KB JS gzipped 69 KB
 
 CI is not configured; run locally before each merge.
 
+### End-to-end tests
+
+```
+nix develop --command pnpm e2e
+```
+
+Headless Chromium only. Browsers come from the Nix dev shell — no
+`npx playwright install` required. Headed mode for local debugging:
+`pnpm e2e:headed`.
+
 ## Project layout
 
 ```
