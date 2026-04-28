@@ -47,7 +47,7 @@ Detail in `./docs/drafts/20260427-2304-m2-plan.md`.
 ## Milestone 3 — PR breakdown
 
 - [x] **PR-16** — Always-pin the tail region (`protectTail: true` unconditionally). Trivial fix.
-- [ ] **PR-17** — Code-block selection bug: reproduce in Playwright, diagnose, fix.
+- [x] **PR-17** — Code-block selection bug: reproduce in Playwright, diagnose, fix.
 - [ ] **PR-18** — Auto-stay-at-bottom: introduce `followTail` intent. When set, every snapshot change re-snaps so the last row sits at viewport bottom. Initial anchor and JumpToLatest set it; user scrolling up clears it.
 
 ---

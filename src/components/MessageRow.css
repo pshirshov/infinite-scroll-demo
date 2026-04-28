@@ -38,7 +38,26 @@
   padding: 8px 10px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 12px;
-  overflow-x: auto;
+  /* Wrap long lines instead of horizontal scroll. overflow-x: auto creates a
+     scroll container that some browsers treat as pan-gesture-eligible on
+     pointer-down, blocking text selection from forming inside the <pre>.
+     User-reported in M3: selecting inside a code block grabbed content above
+     instead. white-space: pre-wrap preserves significant whitespace while
+     wrapping at word boundaries; word-break catches very long unbreakable
+     tokens. */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Ensure text selection is explicitly enabled on message bodies and their
+   children, regardless of what user-agent or parent rules might inherit.
+   Defensive — no known parent disables it, but tightening the contract here
+   avoids future regressions if some overlay (search dropdown, jump pill) ever
+   sets user-select: none more broadly. */
+.chat-message__body,
+.chat-message__body code {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .chat-skeleton {

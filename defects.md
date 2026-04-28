@@ -270,6 +270,20 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 
 ## PR-14
 
+## PR-17
+
+### [PR-17-D01] Selection inside a code block grabs content above instead of code text
+**Status:** resolved (defensive fix; could not repro under Playwright synthetic mouse)
+**Severity:** minor (UX)
+**Location:** `src/components/MessageRow.css`
+**Description:** User-reported during M3 manual testing: "if I start selecting within a code block, a lot of text above the block is selected — but I cannot select anything in the code block." Most likely cause: `.chat-message__body--code` had `overflow-x: auto`, which makes the `<pre>` a scroll container. Some browsers (notably real-mouse Chromium and WebKit) treat scroll containers as pan-gesture-eligible on pointer-down, holding selection-start in abeyance until the pointer leaves the element — by which time it's over a row above, where the selection finally forms.
+**Diagnostic note:** Three Playwright tests targeting code blocks (programmatic Range, drag inside, drag upward from inside) ALL passed on the unmodified code. Synthetic mouse events in headless Chromium don't trigger the same pan-gesture path real input does. Fix is therefore by hypothesis, not from a reproduced failure. Tests pin the post-fix behavior so any regression is caught.
+**Fix:** Two CSS changes in `src/components/MessageRow.css`:
+1. Replaced `overflow-x: auto` with `white-space: pre-wrap; word-break: break-word;`. Long lines wrap instead of scroll; no scroll container is created. Side benefit: long lines stay visible without horizontal scrolling, which was awkward UX.
+2. Added explicit `user-select: text; -webkit-user-select: text;` to `.chat-message__body` and `.chat-message__body code`. Defensive — no current parent disables selection, but tightens the contract against future regressions (e.g. if a search-dropdown overlay sets `user-select: none` more broadly).
+
+---
+
 ## PR-15
 
 ### [PR-15-D01] Empty bodies after scrollbar drag — disposed store reused across StrictMode double-mount
