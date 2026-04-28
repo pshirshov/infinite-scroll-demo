@@ -30,6 +30,13 @@ export function App(): React.JSX.Element {
     };
   }, [backend, store]);
 
+  useEffect(() => {
+    const unsub = backend.subscribeNew((event) => {
+      store.handleLiveMessage(event);
+    });
+    return unsub;
+  }, [backend, store]);
+
   useEffect(() => () => store.dispose(), [store]);
 
   return (

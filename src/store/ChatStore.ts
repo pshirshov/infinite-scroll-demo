@@ -1,5 +1,5 @@
 import type { Message } from "../backend/Message";
-import type { MockBackend } from "../backend/MockBackend";
+import type { MockBackend, NewMessageEvent } from "../backend/MockBackend";
 import {
   type Region,
   insertRegion,
@@ -19,6 +19,7 @@ export interface ChatStoreSnapshot {
   readonly totalLoadedMessages: number;
   readonly inflightCount: number;
   readonly estimatedRowHeight: number;
+  readonly unseenCount: number;
 }
 
 export interface ChatStoreConfig {
@@ -46,6 +47,7 @@ export class ChatStore {
   private readonly backendRef: MockBackend | undefined;
   private evictTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed: boolean = false;
+  private unseenCount: number = 0;
 
   constructor(config: ChatStoreConfig) {
     this.totalCount = config.totalCount;
@@ -88,6 +90,7 @@ export class ChatStore {
         totalLoadedMessages,
         inflightCount: this.coordinator?.inflightCount() ?? 0,
         estimatedRowHeight: this.estimatedRowHeight,
+        unseenCount: this.unseenCount,
       };
     }
     return this.cachedSnapshot;
@@ -183,6 +186,36 @@ export class ChatStore {
       this.evictTimer = null;
       this.evict({ protectTail: false });
     }
+  }
+
+  /**
+   * Handle a live message arriving from the backend. Inserts into the tail region
+   * (insertRegion merges adjacently), increments totalCount, and increments unseenCount.
+   * The viewport's tail-follow effect calls clearUnseen + snap when tailAnchored.
+   */
+  handleLiveMessage(event: NewMessageEvent): void {
+    if (this.disposed) return;
+    const { message, newTotalCount } = event;
+    const region: Region = {
+      startIndex: message.index,
+      endIndex: message.index + 1,
+      messages: [message],
+    };
+    // insertRegion and setTotalCount each call invalidateAndNotify; increment unseenCount
+    // directly so it is included in the next snapshot produced by the final notification.
+    this.unseenCount += 1;
+    this.regions = insertRegion(this.regions, region);
+    if (newTotalCount > this.totalCount) {
+      this.totalCount = newTotalCount;
+    }
+    this.invalidateAndNotify();
+  }
+
+  /** Reset unseen counter — called by the tail-follow effect and JumpToLatest pill. */
+  clearUnseen(): void {
+    if (this.unseenCount === 0) return;
+    this.unseenCount = 0;
+    this.invalidateAndNotify();
   }
 
   dispose(): void {

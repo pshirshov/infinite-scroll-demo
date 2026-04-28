@@ -26,7 +26,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
 - [x] **PR-08** — `jumpToId` end-to-end + dev input field.
 - [x] **PR-09** — Day grouping + sticky date header.
-- [ ] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
+- [x] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
 - [ ] **PR-11** — Debounced search bar with results dropdown → click jumps.
 - [ ] **PR-12** — Polish, README, default N=5M, full scenario sweep.
 
@@ -368,4 +368,31 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     I-2. Recorded as PR-09-N02 note.
   - One lightweight adversarial review: 1 minor defect (D01)
     found and fixed inline; 2 notes recorded.
+
+- **PR-10** (2026-04-27) — Live tail subscription + JumpToLatest pill
+  + auto-follow when tail-anchored. Files: `src/store/ChatStore.ts`
+  (`handleLiveMessage`, `clearUnseen`, `unseenCount` snapshot field),
+  `src/components/JumpToLatest.{tsx,css}`, `src/components/
+  ChatViewport.tsx` (`snapToTail` + auto-follow effect), `src/App.tsx`
+  (subscribeNew effect). 201 tests (+4).
+  Verification: gates exit 0; bundle ~215 KB JS.
+  Notes / surprises:
+  - **`handleLiveMessage` calls the pure `insertRegion(regions, r)`
+    helper directly** — NOT `this.insertRegion(...)` — to avoid
+    double-notify (insertRegion + setTotalCount would notify twice;
+    a single live message must produce a single render).
+  - **`clearUnseen` short-circuits when already 0** — prevents the
+    auto-follow effect's secondary calls from churning the snapshot
+    pointlessly.
+  - **Auto-follow effect** in ChatViewport fires when `tailAnchored
+    && unseenCount > 0`; calls `snapToTail` which calls
+    `setTopIndex + clearUnseen`. Effect re-runs (deps change) but
+    guards on `unseenCount === 0` → no infinite loop.
+  - **JumpToLatest pill** has zero animation: hidden via
+    `null` return, not via CSS opacity transition. Label switches
+    between "N new ↓" and "Jump to latest ↓" based on unseenCount.
+  - **App.tsx subscribe lifecycle** is StrictMode-correct: cleanup
+    unsubscribes; second mount re-subscribes; backend's interval
+    starts/stops with subscriber count per `subscribeNew` contract.
+  - One lightweight adversarial review: GREEN, no defects.
 

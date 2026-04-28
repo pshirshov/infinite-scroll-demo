@@ -3,7 +3,7 @@ import { ChatStore } from "./ChatStore";
 import type { ChatStoreConfig } from "./ChatStore";
 import type { Region } from "./regions";
 import type { Message } from "../backend/Message";
-import type { MockBackend } from "../backend/MockBackend";
+import type { MockBackend, NewMessageEvent } from "../backend/MockBackend";
 
 function makeMsg(index: number): Message {
   return {
@@ -552,6 +552,58 @@ describe("ChatStore.isLoadedOrInflight", () => {
     for (let i = 0; i < 5; i++) await Promise.resolve();
 
     expect(store.isLoadedOrInflight(25)).toBe(true);
+  });
+});
+
+// ---- handleLiveMessage / clearUnseen ----
+
+describe("ChatStore.handleLiveMessage", () => {
+  it("single event: tail region grows, totalCount incremented, unseenCount === 1", () => {
+    const store = new ChatStore({ ...DEFAULT_CONFIG, totalCount: 10 });
+    const event: NewMessageEvent = { message: makeMsg(10), newTotalCount: 11 };
+    store.handleLiveMessage(event);
+
+    const snap = store.getSnapshot();
+    expect(snap.totalCount).toBe(11);
+    expect(snap.totalLoadedMessages).toBe(1);
+    expect(snap.unseenCount).toBe(1);
+    expect(store.findMessage(10)).toBeDefined();
+  });
+
+  it("multiple events: unseenCount accumulates and tail region merges", () => {
+    const store = new ChatStore({ ...DEFAULT_CONFIG, totalCount: 10 });
+    store.insertRegion(makeRegion(8, 10)); // existing tail
+
+    store.handleLiveMessage({ message: makeMsg(10), newTotalCount: 11 });
+    store.handleLiveMessage({ message: makeMsg(11), newTotalCount: 12 });
+
+    const snap = store.getSnapshot();
+    expect(snap.totalCount).toBe(12);
+    expect(snap.unseenCount).toBe(2);
+    // Adjacent regions should have merged
+    expect(snap.regionCount).toBe(1);
+    expect(snap.totalLoadedMessages).toBe(4);
+  });
+
+  it("clearUnseen resets counter to 0", () => {
+    const store = new ChatStore({ ...DEFAULT_CONFIG, totalCount: 10 });
+    store.handleLiveMessage({ message: makeMsg(10), newTotalCount: 11 });
+    store.handleLiveMessage({ message: makeMsg(11), newTotalCount: 12 });
+    expect(store.getSnapshot().unseenCount).toBe(2);
+
+    store.clearUnseen();
+    expect(store.getSnapshot().unseenCount).toBe(0);
+  });
+
+  it("handleLiveMessage after dispose is a no-op", () => {
+    const store = new ChatStore({ ...DEFAULT_CONFIG, totalCount: 10 });
+    store.dispose();
+
+    store.handleLiveMessage({ message: makeMsg(10), newTotalCount: 11 });
+
+    // State unchanged from before dispose
+    expect(store.getSnapshot().totalCount).toBe(10);
+    expect(store.getSnapshot().unseenCount).toBe(0);
   });
 });
 

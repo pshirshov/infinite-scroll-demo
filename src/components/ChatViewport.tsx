@@ -23,6 +23,7 @@ import type { FirstOfDay } from "./MessageRow";
 import { SkeletonRow } from "./SkeletonRow";
 import { CustomScrollbar } from "./CustomScrollbar";
 import { StickyDateHeader } from "./StickyDateHeader";
+import { JumpToLatest } from "./JumpToLatest";
 import { dayKey, isDifferentDay } from "../util/day";
 import "./ChatViewport.css";
 
@@ -58,6 +59,11 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   const [viewportHeight, setViewportHeight] = useState(600);
   const [didInitialAnchor, setDidInitialAnchor] = useState(false);
   const settledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Derived: tail-anchored when last row's estimated bottom is within threshold of viewport bottom.
+  const distanceToLastRowBottom =
+    (totalCount - 1 - topIndex) * snap.estimatedRowHeight - pixelOffset;
+  const tailAnchored = totalCount === 0 || distanceToLastRowBottom <= viewportHeight + TAIL_ANCHOR_THRESHOLD_PX;
 
   // One-shot: once the viewport has a height and the tail region is loaded, snap to the live tail.
   useEffect(() => {
@@ -129,6 +135,34 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
       }
     };
   }, []);
+
+  // Snap to tail and clear unseen — shared by the pill click and the follow effect.
+  const snapToTail = useCallback(() => {
+    const current = store.getSnapshot();
+    const next = applyScrollDelta(
+      { topIndex: current.totalCount - 1, pixelOffset: 0 },
+      0,
+      current.totalCount,
+      store,
+      viewportHeight,
+    );
+    store.setTopIndex(next.topIndex, next.pixelOffset);
+    store.clearUnseen();
+    scheduleEnsureRange();
+  }, [store, viewportHeight, scheduleEnsureRange]);
+
+  // Pill click: jump to tail and resume auto-follow.
+  const onJumpToLatest = useCallback(() => {
+    snapToTail();
+  }, [snapToTail]);
+
+  // Auto-follow effect: when tail-anchored and there are unseen messages, snap forward.
+  // After snap, unseenCount === 0 so the effect won't re-fire.
+  useEffect(() => {
+    if (!tailAnchored) return;
+    if (snap.unseenCount === 0) return;
+    snapToTail();
+  }, [tailAnchored, snap.unseenCount, snap.totalCount, snapToTail]);
 
   // Wheel handler — passive:false so we can prevent default native scroll.
   useEffect(() => {
@@ -370,6 +404,11 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         visibleRowCount={visibleRowCount}
         viewportHeightPx={viewportHeight}
         onJump={onScrollbarJump}
+      />
+      <JumpToLatest
+        visible={!tailAnchored}
+        unseenCount={snap.unseenCount}
+        onClick={onJumpToLatest}
       />
     </div>
   );
