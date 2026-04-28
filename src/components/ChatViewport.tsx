@@ -20,6 +20,7 @@ import { useChatStoreSnapshot } from "../store/useChatStore";
 import { applyScrollDelta, wheelDeltaToPixels } from "../store/scroll";
 import { MessageRow } from "./MessageRow";
 import { SkeletonRow } from "./SkeletonRow";
+import { CustomScrollbar } from "./CustomScrollbar";
 import "./ChatViewport.css";
 
 export interface ChatViewportProps {
@@ -210,6 +211,15 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     [store, viewportHeight, scheduleEnsureRange],
   );
 
+  // Scrollbar jump: set topIndex directly, then schedule a fetch+evict cycle.
+  const onScrollbarJump = useCallback(
+    (target: number) => {
+      store.setTopIndex(target, 0);
+      scheduleEnsureRange();
+    },
+    [store, scheduleEnsureRange],
+  );
+
   // Stable callback for MessageRow's ResizeObserver.
   // I-3: We call store.setHeight here. Store notifies → re-render → new layout pass.
   //      topRow's top is pinned at -pixelOffset; only rows below it reflow.
@@ -262,6 +272,8 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     }
   }
 
+  const visibleRowCount = Math.max(1, Math.ceil(viewportHeight / snap.estimatedRowHeight));
+
   return (
     <div
       ref={viewportRef}
@@ -292,6 +304,13 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
           );
         })}
       </div>
+      <CustomScrollbar
+        topIndex={topIndex}
+        totalCount={totalCount}
+        visibleRowCount={visibleRowCount}
+        viewportHeightPx={viewportHeight}
+        onJump={onScrollbarJump}
+      />
     </div>
   );
 }

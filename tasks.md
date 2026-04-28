@@ -23,7 +23,7 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
 - [x] **PR-04** — Index-space scroll engine over a fixed preloaded slice; wheel/keyboard input; ResizeObserver.
 - [x] **PR-05** — On-demand fetch + region merging + request coalescing; skeleton rows for unloaded.
 - [x] **PR-06** — Debounced eviction + topRow height-correction + region-count debug badge.
-- [ ] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
+- [x] **PR-07** — Custom scrollbar (drag + click-track) at N=5M scale.
 - [ ] **PR-08** — `jumpToId` end-to-end + dev input field.
 - [ ] **PR-09** — Day grouping + sticky date header.
 - [ ] **PR-10** — Live tail subscription + `JumpToLatest` pill + auto-follow.
@@ -283,4 +283,34 @@ Detail in `./docs/drafts/20260427-2304-m1-plan.md`. One line per PR here.
     region itself isn't in `evictedRegions`.
   - One adversarial review (lighter pass given mostly mechanical
     wiring): GREEN with 1 advisory (D01).
+
+- **PR-07** (2026-04-27) — Custom scrollbar: vertical track on right
+  edge of viewport, draggable thumb at `topIndex / N`, click-on-track
+  pages up/down. Thumb height clamped to min 24 px so it stays
+  draggable at N=5M scale. Files: `src/components/scrollbarMath.{ts,
+  test.ts}` (pure helpers, 16 tests), `src/components/CustomScrollbar.
+  {tsx,css}`, `src/components/ChatViewport.{tsx,css}` (flex layout to
+  accommodate scrollbar column; `onScrollbarJump` calls `setTopIndex
+  + scheduleEnsureRange`). 182 tests total (+16).
+  Verification: `pnpm typecheck`, `pnpm test --run`, `pnpm build`
+  all exit 0; bundle 211 KB JS.
+  Notes / surprises:
+  - **Scrollbar is index-space**, not pixel-space. Thumb position
+    is `topIndex / max(1, totalCount-1)` of available track. With
+    N=5M and viewportHeight=600, the thumb is clamped to 24 px (the
+    natural size would be 0.0012 px). Drag → frac → topIndex is
+    pure arithmetic; no cumulative drift.
+  - **Drag is pass-through**: every pointermove computes a new
+    topIndex and calls `onJump`, which mutates the store. No
+    separate "dragging" state. Thumb position is always derived
+    from store state. PR-07-D01 noted that pointer-capture used
+    `e.target as Element`; replaced with `e.currentTarget` to
+    avoid the latent foot-gun if thumb ever gains children.
+  - **Click on bare track pages** by `visibleRowCount` —
+    `clickToTargetIndex` returns `null` when click lands on the
+    thumb so dragging doesn't trigger spurious page jumps.
+  - Layout uses `display: flex` on the viewport; scrollbar column
+    is fixed-width 12 px with `flex-shrink: 0`.
+  - One lightweight adversarial review: GREEN with 1 minor
+    (D01) fixed inline.
 

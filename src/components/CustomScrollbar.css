@@ -1,0 +1,21 @@
+.custom-scrollbar {
+  width: 12px;
+  position: relative;
+  background: #f0f0f0;
+  flex-shrink: 0;
+}
+
+.custom-scrollbar__thumb {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background: #888;
+  border-radius: 4px;
+  cursor: grab;
+  user-select: none;
+}
+
+.custom-scrollbar__thumb:active {
+  cursor: grabbing;
+  background: #666;
+}

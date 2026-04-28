@@ -268,6 +268,17 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 
 ## PR-06
 
+## PR-07
+
+### [PR-07-D01] `e.target as Element` cast on pointer-capture call (latent foot-gun)
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/components/CustomScrollbar.tsx:36, 56`
+**Description:** Thumb pointer handlers cast `e.target` to `Element` and call `setPointerCapture` on it. `e.target` is the deepest element under the pointer; if the thumb gains a child node later (icon, label), capture would attach to the child, and small movement could lose hit-test → release. Currently safe (thumb has no children).
+**Fix:** Replaced with `e.currentTarget.setPointerCapture(e.pointerId)` (and the symmetric `releasePointerCapture`). `currentTarget` is typed `HTMLDivElement` directly — no cast, no foot-gun. Verified gates still pass (182/182 tests).
+
+---
+
 ### [PR-06-D01] Tail-anchor formula off by one row-height (advisory)
 **Status:** resolved (note-only — more permissive than spec, harmless)
 **Severity:** nit
