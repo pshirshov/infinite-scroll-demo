@@ -7,8 +7,14 @@ import "./styles.css";
 const N = 1_000_000;
 
 export function App(): React.JSX.Element {
-  const [store] = useState(() => new ChatStore({ totalCount: N, estimatedRowHeight: 60, keepRadius: 500 }));
   const [backend] = useState(() => new MockBackend({ totalCount: N, seed: 42 }));
+  const [store] = useState(() => new ChatStore({
+    totalCount: N,
+    estimatedRowHeight: 60,
+    keepRadius: 500,
+    backend,
+    chunkSize: 100,
+  }));
 
   useEffect(() => {
     let cancelled = false;
@@ -21,6 +27,8 @@ export function App(): React.JSX.Element {
       cancelled = true;
     };
   }, [backend, store]);
+
+  useEffect(() => () => store.dispose(), [store]);
 
   return (
     <div className="app">

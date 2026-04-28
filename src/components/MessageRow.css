@@ -40,3 +40,11 @@
   font-size: 12px;
   overflow-x: auto;
 }
+
+.chat-skeleton {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background-color: #fafafa;
+  border-bottom: 1px solid #f0f0f0;
+}

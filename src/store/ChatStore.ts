@@ -1,4 +1,5 @@
 import type { Message } from "../backend/Message";
+import type { MockBackend } from "../backend/MockBackend";
 import {
   type Region,
   insertRegion,
@@ -7,6 +8,7 @@ import {
   isLoaded,
   unloadedSubranges,
 } from "./regions";
+import { FetchCoordinator } from "./fetchCoordinator";
 
 export interface ChatStoreSnapshot {
   readonly regions: readonly Region[];
@@ -15,12 +17,17 @@ export interface ChatStoreSnapshot {
   readonly pixelOffset: number;
   readonly regionCount: number;
   readonly totalLoadedMessages: number;
+  readonly inflightCount: number;
+  readonly estimatedRowHeight: number;
 }
 
 export interface ChatStoreConfig {
   readonly totalCount: number;
   readonly estimatedRowHeight: number;
   readonly keepRadius: number;
+  readonly backend?: MockBackend;
+  readonly chunkSize?: number;
+  readonly prefetchOverscan?: number;
 }
 
 export class ChatStore {
@@ -33,11 +40,22 @@ export class ChatStore {
   private readonly keepRadius: number;
   private readonly listeners: Set<() => void> = new Set();
   private cachedSnapshot: ChatStoreSnapshot | null = null;
+  private readonly coordinator: FetchCoordinator | null;
 
   constructor(config: ChatStoreConfig) {
     this.totalCount = config.totalCount;
     this.estimatedRowHeight = config.estimatedRowHeight;
     this.keepRadius = config.keepRadius;
+
+    if (config.backend !== undefined) {
+      this.coordinator = new FetchCoordinator({
+        backend: config.backend,
+        ...(config.chunkSize !== undefined ? { chunkSize: config.chunkSize } : {}),
+        onChunk: (region) => this.insertRegion(region),
+      });
+    } else {
+      this.coordinator = null;
+    }
   }
 
   // --- Observable ---
@@ -62,6 +80,8 @@ export class ChatStore {
         pixelOffset: this.pixelOffset,
         regionCount: this.regions.length,
         totalLoadedMessages,
+        inflightCount: this.coordinator?.inflightCount() ?? 0,
+        estimatedRowHeight: this.estimatedRowHeight,
       };
     }
     return this.cachedSnapshot;
@@ -111,6 +131,34 @@ export class ChatStore {
 
   unloadedSubranges(start: number, end: number): readonly { start: number; end: number }[] {
     return unloadedSubranges(this.regions, start, end);
+  }
+
+  /** Trigger fetches for any unloaded sub-ranges within [start, end). Idempotent. No-op when no backend is configured. */
+  ensureRange(start: number, end: number): void {
+    if (this.coordinator === null) return;
+    const clamped = {
+      start: Math.max(0, start),
+      end: Math.min(this.totalCount, end),
+    };
+    if (clamped.start >= clamped.end) return;
+    this.coordinator.ensureRange({ start: clamped.start, end: clamped.end, currentRegions: this.regions });
+  }
+
+  /** Abort fetches whose chunks fall entirely outside [keepStart, keepEnd). */
+  abortFetchesOutside(keepStart: number, keepEnd: number): void {
+    this.coordinator?.abortOutside(keepStart, keepEnd);
+  }
+
+  /** Returns true if the index is loaded OR has an in-flight fetch covering it. */
+  isLoadedOrInflight(index: number): boolean {
+    if (isLoaded(this.regions, index)) return true;
+    if (this.coordinator === null) return false;
+    return this.coordinator.inflightChunks().some((c) => c.start <= index && index < c.end);
+  }
+
+  dispose(): void {
+    this.coordinator?.dispose();
+    this.listeners.clear();
   }
 
   // --- Heights ---

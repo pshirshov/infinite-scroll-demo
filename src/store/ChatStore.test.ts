@@ -3,6 +3,7 @@ import { ChatStore } from "./ChatStore";
 import type { ChatStoreConfig } from "./ChatStore";
 import type { Region } from "./regions";
 import type { Message } from "../backend/Message";
+import type { MockBackend } from "../backend/MockBackend";
 
 function makeMsg(index: number): Message {
   return {
@@ -350,5 +351,106 @@ describe("ChatStore delegation to regions", () => {
     store.insertRegion(makeRegion(10, 15));
     const gaps = store.unloadedSubranges(0, 15);
     expect(gaps).toEqual([{ start: 5, end: 10 }]);
+  });
+});
+
+// ---- inflightCount in snapshot ----
+
+describe("ChatStore snapshot inflightCount", () => {
+  it("is 0 when no backend is configured", () => {
+    const store = new ChatStore(DEFAULT_CONFIG);
+    expect(store.getSnapshot().inflightCount).toBe(0);
+  });
+});
+
+// ---- ensureRange + isLoadedOrInflight ----
+
+function makeFakeBackend(
+  getRange: (start: number, end: number, signal?: AbortSignal) => Promise<readonly Message[]>,
+): MockBackend {
+  return { getRange } as unknown as MockBackend;
+}
+
+describe("ChatStore.ensureRange", () => {
+  it("is a no-op when no backend is configured", () => {
+    const store = new ChatStore(DEFAULT_CONFIG);
+    // Should not throw
+    store.ensureRange(0, 100);
+    expect(store.getSnapshot().inflightCount).toBe(0);
+  });
+
+  it("triggers fetch → region is inserted after resolve", async () => {
+    const backend = makeFakeBackend((start, end) => {
+      const msgs: Message[] = [];
+      for (let i = start; i < end; i++) msgs.push(makeMsg(i));
+      return Promise.resolve(msgs);
+    });
+
+    const store = new ChatStore({ ...DEFAULT_CONFIG, backend, chunkSize: 100 });
+    store.ensureRange(0, 50);
+
+    // In-flight before resolve
+    expect(store.getSnapshot().inflightCount).toBe(1);
+
+    // Let promise callbacks run (multiple rounds to flush promise chains)
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+
+    // After resolve, region should be loaded
+    const snap = store.getSnapshot();
+    expect(snap.regionCount).toBe(1);
+    expect(snap.totalLoadedMessages).toBe(50);
+    expect(snap.inflightCount).toBe(0);
+  });
+
+  it("clamps start/end to [0, totalCount)", () => {
+    const getRange = vi.fn((start: number, end: number): Promise<readonly Message[]> => {
+      const msgs: Message[] = [];
+      for (let i = start; i < end; i++) msgs.push(makeMsg(i));
+      return Promise.resolve(msgs);
+    });
+    const backend = makeFakeBackend(getRange);
+
+    const store = new ChatStore({ ...DEFAULT_CONFIG, totalCount: 100, backend, chunkSize: 200 });
+    store.ensureRange(-50, 150); // should clamp to [0, 100)
+
+    expect(getRange).toHaveBeenCalledWith(0, 100, expect.anything());
+  });
+});
+
+describe("ChatStore.isLoadedOrInflight", () => {
+  it("returns false when nothing is loaded and no fetch is in-flight", () => {
+    const store = new ChatStore(DEFAULT_CONFIG);
+    expect(store.isLoadedOrInflight(5)).toBe(false);
+  });
+
+  it("returns true for loaded index", () => {
+    const store = new ChatStore(DEFAULT_CONFIG);
+    store.insertRegion(makeRegion(0, 10));
+    expect(store.isLoadedOrInflight(5)).toBe(true);
+  });
+
+  it("returns true for index covered by an in-flight fetch, before resolve", () => {
+    const backend = makeFakeBackend(() => new Promise(() => {})); // never resolves
+    const store = new ChatStore({ ...DEFAULT_CONFIG, backend, chunkSize: 100 });
+
+    store.ensureRange(0, 50);
+
+    // Not loaded yet, but in-flight
+    expect(store.isLoaded(25)).toBe(false);
+    expect(store.isLoadedOrInflight(25)).toBe(true);
+  });
+
+  it("returns true for index after fetch resolves", async () => {
+    const backend = makeFakeBackend((start, end) => {
+      const msgs: Message[] = [];
+      for (let i = start; i < end; i++) msgs.push(makeMsg(i));
+      return Promise.resolve(msgs);
+    });
+    const store = new ChatStore({ ...DEFAULT_CONFIG, backend, chunkSize: 100 });
+
+    store.ensureRange(0, 50);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+
+    expect(store.isLoadedOrInflight(25)).toBe(true);
   });
 });

@@ -19,6 +19,7 @@ import type { ChatStore } from "../store/ChatStore";
 import { useChatStoreSnapshot } from "../store/useChatStore";
 import { applyScrollDelta, wheelDeltaToPixels } from "../store/scroll";
 import { MessageRow } from "./MessageRow";
+import { SkeletonRow } from "./SkeletonRow";
 import "./ChatViewport.css";
 
 export interface ChatViewportProps {
@@ -34,6 +35,12 @@ const WHEEL_LINE_PX = KEYBOARD_SCROLL_PX;
 /** PageUp/Down overlap so user doesn't lose context. */
 const PAGE_SCROLL_OVERLAP_PX = 40;
 
+/** Extra rows beyond viewport edge to prefetch. */
+const PREFETCH_OVERSCAN = 200;
+
+/** Debounce delay before issuing ensureRange after scroll settles, ms. */
+const SCROLL_SETTLED_DELAY_MS = 150;
+
 export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   const snap = useChatStoreSnapshot(store);
   const { topIndex, pixelOffset, totalCount } = snap;
@@ -41,6 +48,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [viewportHeight, setViewportHeight] = useState(600);
   const [didInitialAnchor, setDidInitialAnchor] = useState(false);
+  const settledTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // One-shot: once the viewport has a height and the tail region is loaded, snap to the live tail.
   useEffect(() => {
@@ -57,7 +65,12 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     );
     store.setTopIndex(next.topIndex, next.pixelOffset);
     setDidInitialAnchor(true);
-  }, [didInitialAnchor, viewportHeight, snap.regions, snap.totalCount, store]);
+    // Prefetch around the post-anchor position with correct topIndex.
+    const start = next.topIndex - PREFETCH_OVERSCAN;
+    const end = next.topIndex + Math.ceil(viewportHeight / snap.estimatedRowHeight) + PREFETCH_OVERSCAN;
+    store.ensureRange(start, Math.min(end, snap.totalCount));
+    store.abortFetchesOutside(start, Math.min(end, snap.totalCount));
+  }, [didInitialAnchor, viewportHeight, snap.regions, snap.totalCount, snap.estimatedRowHeight, store]);
 
   // Track viewport height via ResizeObserver.
   useEffect(() => {
@@ -70,6 +83,35 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     });
     observer.observe(el);
     return () => observer.disconnect();
+  }, []);
+
+  // Debounced prefetch: fires ensureRange for the visible+overscan window after scroll settles.
+  // Reads fresh state at fire time so a scroll between schedule and fire uses the right window.
+  const scheduleEnsureRange = useCallback(() => {
+    if (settledTimerRef.current !== null) {
+      clearTimeout(settledTimerRef.current);
+    }
+    settledTimerRef.current = setTimeout(() => {
+      settledTimerRef.current = null;
+      const current = store.getSnapshot();
+      const start = current.topIndex - PREFETCH_OVERSCAN;
+      const end =
+        current.topIndex +
+        Math.ceil(viewportHeight / current.estimatedRowHeight) +
+        PREFETCH_OVERSCAN;
+      const clampedEnd = Math.min(end, current.totalCount);
+      store.ensureRange(start, clampedEnd);
+      store.abortFetchesOutside(start, clampedEnd);
+    }, SCROLL_SETTLED_DELAY_MS);
+  }, [store, viewportHeight]);
+
+  // Cleanup settled timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (settledTimerRef.current !== null) {
+        clearTimeout(settledTimerRef.current);
+      }
+    };
   }, []);
 
   // Wheel handler — passive:false so we can prevent default native scroll.
@@ -89,11 +131,12 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
       );
       if (next.topIndex !== current.topIndex || next.pixelOffset !== current.pixelOffset) {
         store.setTopIndex(next.topIndex, next.pixelOffset);
+        scheduleEnsureRange();
       }
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [store, viewportHeight]);
+  }, [store, viewportHeight, scheduleEnsureRange]);
 
   // Keyboard handler — only active when the viewport has focus.
   const onKeyDown = useCallback(
@@ -123,6 +166,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
           viewportHeight,
         );
         store.setTopIndex(next.topIndex, next.pixelOffset);
+        scheduleEnsureRange();
         return;
       } else if (e.key === "End") {
         e.preventDefault();
@@ -135,6 +179,7 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
           viewportHeight,
         );
         store.setTopIndex(next.topIndex, next.pixelOffset);
+        scheduleEnsureRange();
         return;
       }
 
@@ -148,10 +193,11 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         );
         if (next.topIndex !== current.topIndex || next.pixelOffset !== current.pixelOffset) {
           store.setTopIndex(next.topIndex, next.pixelOffset);
+          scheduleEnsureRange();
         }
       }
     },
-    [store, viewportHeight],
+    [store, viewportHeight, scheduleEnsureRange],
   );
 
   // Stable callback for MessageRow's ResizeObserver.
@@ -187,10 +233,8 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
         belowOverscanCount++;
         if (belowOverscanCount > OVERSCAN_BELOW) break;
       }
-      const msg = store.findMessage(i);
-      if (msg !== undefined) {
-        rowsToRender.push({ index: i, topPx: y });
-      }
+      // Include the row regardless of loaded state — skeleton fills the gap.
+      rowsToRender.push({ index: i, topPx: y });
       y += store.getHeight(i);
       i++;
     }
@@ -203,10 +247,8 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
     for (let count = 0; count < OVERSCAN_ABOVE && topIndex - count - 1 >= 0; count++) {
       const i = topIndex - count - 1;
       y -= store.getHeight(i);
-      const msg = store.findMessage(i);
-      if (msg !== undefined) {
-        rowsToRender.push({ index: i, topPx: y });
-      }
+      // Include regardless of loaded state.
+      rowsToRender.push({ index: i, topPx: y });
     }
   }
 
@@ -220,13 +262,22 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
       <div className="chat-viewport__rows">
         {rowsToRender.map(({ index, topPx }) => {
           const msg = store.findMessage(index);
-          if (msg === undefined) return null;
+          if (msg !== undefined) {
+            return (
+              <MessageRow
+                key={index}
+                message={msg}
+                absoluteTopPx={topPx}
+                onMeasured={onMeasured}
+              />
+            );
+          }
           return (
-            <MessageRow
+            <SkeletonRow
               key={index}
-              message={msg}
+              index={index}
+              heightPx={store.getHeight(index)}
               absoluteTopPx={topPx}
-              onMeasured={onMeasured}
             />
           );
         })}

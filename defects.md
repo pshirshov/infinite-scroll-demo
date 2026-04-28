@@ -45,49 +45,49 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 ## PR-02
 
 ### [PR-02-D01] `indexToId` produces malformed IDs for index ≥ 100_000_000 and for negative indices (encoder/decoder asymmetry)
-**Status:** under fix
+**Status:** resolved
 **Severity:** minor
 **Location:** `src/backend/Message.ts:22-24`
 **Description:** `indexToId(100000000)` returns `"msg-100000000"` (9 digits) and `indexToId(-1)` returns `"msg-000000-1"`. Both round-trip via `idToIndex` throw `Malformed message id`. The encoder produces values its own decoder rejects — a contract asymmetry. While N=5,000,000 is well under 100M, no upstream guard prevents misuse, and negative inputs corrupt silently.
 **Suggested fix:** Validate `Number.isInteger(index) && index >= 0 && index <= 99_999_999` in `indexToId`, throw `Error("indexToId: index out of range")` otherwise. Keep the 8-digit fixed-width contract (decoder unchanged).
 
 ### [PR-02-D02] Test gap: case-insensitive search not asserted to find the same hits regardless of query case
-**Status:** under fix
+**Status:** resolved
 **Severity:** minor
 **Location:** `src/backend/MockBackend.test.ts:208-213`
 **Description:** Existing test only checks the snippet contains "the" lowercase when query is "The". Doesn't verify `search("THE")` and `search("the")` return the same hit set. Regression where impl lowercased only body or only query would not be caught.
 **Suggested fix:** Add a test comparing hit indices between `search("the")` and `search("THE")`; assert equal length and pointwise-equal `index` values.
 
 ### [PR-02-D03] Test gap: search scan-budget cap (50_000) is not actually verified
-**Status:** under fix
+**Status:** resolved
 **Severity:** minor
 **Location:** `src/backend/MockBackend.test.ts` (no test exists)
 **Description:** Implementation caps scan at `Math.min(totalCount, 50_000)`. No test exercises N > 50_000 to verify scan stops. Hit-budget cap is independently enforced; dropping `Math.min` would still pass current tests.
 **Suggested fix:** Add `scanBudget` and `hitBudget` (or just `searchScanBudget`/`searchHitBudget`) to `MockBackendConfig` with current defaults. Test sets `searchScanBudget=10`, asserts that a token guaranteed to appear at index ≥ 10 is NOT in the hit list while ones at index < 10 are.
 
 ### [PR-02-D04] Test gap (or unreachable code): mid-loop abort branch in `search` has no test
-**Status:** under fix
+**Status:** resolved
 **Severity:** minor
 **Location:** `src/backend/MockBackend.test.ts:365-375`
 **Description:** Existing abort test fires `controller.abort()` synchronously, so the abort happens during the initial `await delay(...)` — never inside the per-row loop. If the implementation has a mid-loop `if (signal?.aborted) throw …` it is uncovered; if the loop is fully synchronous between awaits, the check is unreachable.
 **Suggested fix:** First check the implementation. If the loop is synchronous (no awaits between iterations), REMOVE the dead mid-loop signal check (it can never fire — JS can't service the abort) and add a one-line code comment explaining why no in-loop check is needed. If the loop yields (via `await Promise.resolve()` every K rows, say), add a test that aborts during the scan and asserts `AbortError`. Pick whichever matches current behavior; do not add a yield purely to enable the test.
 
 ### [PR-02-D05] Test gap: non-zero latency determinism never asserted
-**Status:** under fix
+**Status:** resolved
 **Severity:** minor
 **Location:** `src/backend/MockBackend.test.ts` (no test exists)
 **Description:** Spec: "latency is deterministic across runs" via seeded latency RNG. All tests use min=max=0 (or 100=100), trivially deterministic. A regression replacing `latencyRng` with `Math.random` would not fail any current test.
 **Suggested fix:** Add a test using fake timers and bounds (e.g. min=10, max=20). Two backends with same seed run identical call sequences; capture per-call delay durations (e.g. via `vi.advanceTimersByTime` increments needed); assert sequences equal. Alternatively expose a `peekNextLatencyMs()` test hook on the backend.
 
 ### [PR-02-D06] Test gap: emitted live-tail message body not asserted equal to `generateMessage(ctx, N)`
-**Status:** under fix
+**Status:** resolved
 **Severity:** nit
 **Location:** `src/backend/MockBackend.test.ts:250-277`
 **Description:** Test only compares `id`. Since `id` depends on index alone, two implementations that diverge on body/author/ts but agree on index would pass.
 **Suggested fix:** Strengthen to `expect(range[0]).toEqual(emittedMessage)`.
 
 ### [PR-02-D07] Test gap: `idToIndex` strictness for trailing-junk inputs
-**Status:** under fix
+**Status:** resolved
 **Severity:** nit
 **Location:** `src/backend/MockBackend.test.ts:27-38`
 **Description:** Tests cover missing prefix, wrong digit count, non-numeric digits, but not `"msg-00001234extra"` (correct prefix and 8 digits but trailing junk). Current impl rejects it; behavior is just not pinned.
@@ -198,6 +198,80 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 **Location:** `src/store/scroll.ts:applyScrollDelta`
 **Description:** When `heightOf(totalCount-1) >= viewportHeight`, End yields `{topIndex: last, pixelOffset: 0}` — last row's TOP at viewport top, leaving blank space below. With 60-px estimate vs ~600 px viewport, never triggers in practice.
 **Fix:** Deferred. If row sizes change to allow this case, snap with `pixelOffset = heightOf(last) - viewportHeight`.
+
+---
+
+## PR-05
+
+### [PR-05-D01] Resolved-after-aborted race: stale region inserted when fetch resolves after abort
+**Status:** resolved
+**Severity:** major
+**Location:** `src/store/fetchCoordinator.ts:.then` resolution handler
+**Description:** Resolution callback unconditionally calls `onChunk(region)` and does not check `signal.aborted`. If `abortOutside` or `dispose` aborts a controller in the window between data computation completing and the `.then` microtask running, a stale region is inserted. Brief explicitly required this check.
+**Suggested fix:** In the `.then` callback, check `if (controller.signal.aborted) return;` before calling `onChunk`. Same protection in `.catch` (don't call `onError` for our own abort vs an external error). Use a `disposed` flag in `dispose()` to suppress all callbacks during teardown.
+
+### [PR-05-D02] `ChatStore.abortFetchesOutside` exposed but never called
+**Status:** resolved
+**Severity:** major
+**Location:** `src/store/ChatStore.ts` (method) + `src/components/ChatViewport.tsx` (no call site)
+**Description:** Method implemented and tested, but no caller. Off-screen fetches from prior scroll positions remain in flight, waste cycles, and trigger re-renders for content the user is no longer looking at.
+**Suggested fix:** In `ChatViewport`'s scroll-settled callback, after `ensureRange(start, end)`, also call `store.abortFetchesOutside(start, end)`. The keep-window matches the prefetch window — anything outside is no longer needed.
+
+### [PR-05-D03] Mount-time prefetch fires with stale topIndex (=0) before initial anchor jump
+**Status:** resolved
+**Severity:** major
+**Location:** `src/components/ChatViewport.tsx:100-110`
+**Description:** Mount effect captures `topIndex=0` (initial state), schedules 150ms timer to fetch `[0, 210)`. Meanwhile `getLatest(200)` resolves and the initial-anchor effect snaps `topIndex` to ~tail. The timer fires with the stale topIndex → wasted fetch of beginning of chat. After the anchor jump, no further `scheduleEnsureRange` is invoked, so the area surrounding the new top is not prefetched until the user scrolls.
+**Suggested fix:** Move the `scheduleEnsureRange` call into the same effect that handles the initial anchor — fire it once after the anchor lands, with the post-anchor topIndex. Drop the mount-time call. Alternative: make `scheduleEnsureRange` self-reading from `store.getSnapshot()` at the moment the timer fires, rather than capturing the topIndex at schedule time, so any state change between schedule and fire is honored.
+
+### [PR-05-D04] Hardcoded `60` row-height constant in prefetch window calculation
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/components/ChatViewport.tsx:92`
+**Description:** `Math.ceil(viewportHeight / 60)` literal duplicates `estimatedRowHeight`. Coupled by accident.
+**Suggested fix:** Expose `estimatedRowHeight` on the snapshot or via a `getEstimatedRowHeight()` accessor on `ChatStore`; read it at use-site.
+
+### [PR-05-D05] `isLoadedOrInflight` calls `inflightKeysForTest()` (test-only API) and parses string keys
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/store/ChatStore.ts:154`
+**Description:** Production code parses `${start}-${end}` keys to determine inflight chunks. Fragile if key format changes; couples production to test API.
+**Suggested fix:** Add a typed `inflightChunks(): Iterable<{start: number; end: number}>` (or `readonly { start, end }[]`) on `FetchCoordinator`. `isLoadedOrInflight` consumes that.
+
+### [PR-05-D06] No dispose lifecycle on `ChatStore` / `FetchCoordinator`
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/store/ChatStore.ts`, `src/components/ChatViewport.tsx` cleanup, possibly `src/App.tsx`
+**Description:** `FetchCoordinator.dispose()` exists but nothing calls it. Under HMR or unmount, in-flight fetches leak; their handlers still try to mutate the store.
+**Suggested fix:** Add `ChatStore.dispose()` that calls `coordinator.dispose()`. Call from `App.tsx`'s store effect cleanup, OR from a top-level effect in `ChatViewport`. Disable mutators after dispose (or at least make them no-ops with a warning).
+
+### [PR-05-D07] `chunkSize: 0` causes infinite loop in `ensureRange`
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/store/fetchCoordinator.ts:41-43`
+**Description:** Loop `while (chunkStart < gap.end) { chunkEnd = chunkStart + 0; chunkStart = chunkEnd; }` never advances → hang.
+**Suggested fix:** Validate `chunkSize >= 1` in the constructor (throw on violation). Add a test.
+
+### [PR-05-D08] Synchronous throw in `backend.getRange` leaks inflight entry
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/store/fetchCoordinator.ts:47-69`
+**Description:** `this.inflight.set(key, controller)` runs before `backend.getRange(...)`. If `getRange` throws synchronously, control bypasses `.then/.catch` and the inflight entry persists.
+**Suggested fix:** Wrap the call in `try { ... } catch (e) { this.inflight.delete(key); ... }` OR use `.finally(() => this.inflight.delete(key))` on the promise chain.
+
+### [PR-05-D09] `dispose` triggers an `onError` flood for every aborted chunk
+**Status:** resolved
+**Severity:** nit
+**Location:** `src/store/fetchCoordinator.ts:dispose`
+**Description:** `dispose` aborts every controller; each `.catch` handler then calls `onError` for what is effectively user-initiated teardown. If the consumer wires `onError` to a toast, a flood of "aborted" errors appears.
+**Suggested fix:** Set an internal `disposed: boolean` flag at the top of `dispose()`. `.catch` handler checks the flag and skips `onError`. Apply the same flag to `.then` to suppress `onChunk` (covers the same race as D01).
+
+### [PR-05-D10] Test gaps for race conditions and edge cases
+**Status:** resolved
+**Severity:** minor
+**Location:** `src/store/fetchCoordinator.test.ts`
+**Description:** Missing tests for: resolved-after-abort race (D01); dispose-during-pending-resolve (D09); `ensureRange` after `abortOutside` (chunk re-issuable after abort); `chunkSize: 0` validation (D07); empty range `start === end`.
+**Suggested fix:** Add 4-5 tests covering the above. Each maps directly to a defect or to a brief-listed probe.
 
 ### [PR-04-D07] Mid-topRow `pixelOffset` is not adjusted when topRow's measured height changes
 **Status:** resolved (deferred to PR-05+ — pure text rows don't reflow; revisit if images/async content land)
