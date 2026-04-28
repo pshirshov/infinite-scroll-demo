@@ -268,6 +268,24 @@ Defect ID format: `PR-NN-DMM` — assigned sequentially within the PR group, nev
 
 ## PR-06
 
+## Post-M1 hotfix
+
+### [POST-D01] First render hangs at N=5M — layout pass walks all `totalCount` indices when `viewportHeight === null`
+**Status:** resolved
+**Severity:** major (regression introduced in PR-12)
+**Location:** `src/components/ChatViewport.tsx:301`
+**Description:** PR-12 changed `viewportHeight` from `useState(600)` to `useState<number | null>(null)`, with null-guards added at every USE site. But the layout-pass loop's in-viewport check became `viewportHeight === null || y < viewportHeight` — when null, this is `true` for every row, and the loop's break condition (`belowOverscanCount > OVERSCAN_BELOW`) never triggers. At N=5,000,000 the first render walks all 5M indices, allocates a 5M-entry `rowsToRender` array, and React tries to render 5M `<MessageRow>`/`<SkeletonRow>` elements — the main thread hangs for tens of seconds and the page never paints. User-reported: "stays in 'transferring data' for a while and then just hangs."
+**Fix:** Wrapped the entire below-and-above layout walks in `if (viewportHeight !== null) { ... }`. Until ResizeObserver delivers the first measurement, render zero rows. Once `viewportHeight` is set (a microtask after the first commit), the layout pass walks normally — visible-window + overscan, bounded to ~15 iterations regardless of N. Applied in PR-12 follow-up commit.
+
+### [POST-D02] vitest globs match `.direnv/flake-inputs/` snapshots → "Cannot find module" failures
+**Status:** resolved
+**Severity:** minor
+**Location:** `vite.config.ts`
+**Description:** direnv mirrors flake inputs into `.direnv/flake-inputs/<hash>-source/`, including a snapshot of this repo whose paths point into the (now-vanished) nix store. Vitest's default test glob picks those up, then can't load them at run time, surfacing as 7 "Failed Suites" alongside the 201 actually-passing tests. Latent before; surfaced after enough nix-develop invocations populated the cache.
+**Fix:** Added `exclude: ["**/node_modules/**", "**/dist/**", "**/.direnv/**", "**/dist-node/**"]` to vitest config. 7 files clean, 201 tests pass.
+
+---
+
 ## PR-09
 
 ### [PR-09-D01] Sticky-header override picks the wrong day when multiple firstOfDay rows are above the fold

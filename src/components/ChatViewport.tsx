@@ -292,57 +292,63 @@ export function ChatViewport({ store }: ChatViewportProps): React.JSX.Element {
 
   const rowsToRender: RowEntry[] = [];
 
-  // Rows BELOW topIndex (and topIndex itself) — walk forward.
-  {
-    let y = -pixelOffset;
-    let i = topIndex;
-    let belowOverscanCount = 0;
-    while (i < totalCount) {
-      const inViewport = viewportHeight === null || y < viewportHeight;
-      if (!inViewport) {
-        belowOverscanCount++;
-        if (belowOverscanCount > OVERSCAN_BELOW) break;
-      }
-      // Include the row regardless of loaded state — skeleton fills the gap.
-      let firstOfDay: FirstOfDay | undefined = undefined;
-      const msg = store.findMessage(i);
-      if (msg !== undefined) {
-        if (i === 0) {
-          firstOfDay = { dayKey: dayKey(msg.ts) };
-        } else {
-          const prevMsg = store.findMessage(i - 1);
-          if (prevMsg !== undefined && isDifferentDay(prevMsg.ts, msg.ts)) {
+  // The layout pass needs viewportHeight to know when to stop walking down
+  // from topIndex. Until ResizeObserver delivers the first measurement,
+  // render no rows — otherwise the below-loop walks all `totalCount` indices,
+  // which at N=5M hangs the main thread for tens of seconds.
+  if (viewportHeight !== null) {
+    // Rows BELOW topIndex (and topIndex itself) — walk forward.
+    {
+      let y = -pixelOffset;
+      let i = topIndex;
+      let belowOverscanCount = 0;
+      while (i < totalCount) {
+        const inViewport = y < viewportHeight;
+        if (!inViewport) {
+          belowOverscanCount++;
+          if (belowOverscanCount > OVERSCAN_BELOW) break;
+        }
+        // Include the row regardless of loaded state — skeleton fills the gap.
+        let firstOfDay: FirstOfDay | undefined = undefined;
+        const msg = store.findMessage(i);
+        if (msg !== undefined) {
+          if (i === 0) {
             firstOfDay = { dayKey: dayKey(msg.ts) };
+          } else {
+            const prevMsg = store.findMessage(i - 1);
+            if (prevMsg !== undefined && isDifferentDay(prevMsg.ts, msg.ts)) {
+              firstOfDay = { dayKey: dayKey(msg.ts) };
+            }
           }
         }
+        rowsToRender.push({ index: i, topPx: y, firstOfDay });
+        y += store.getHeight(i);
+        i++;
       }
-      rowsToRender.push({ index: i, topPx: y, firstOfDay });
-      y += store.getHeight(i);
-      i++;
     }
-  }
 
-  // Rows ABOVE topIndex — walk backward.
-  // I-2: topPx for above-rows derived backward from topRow's top (= -pixelOffset).
-  {
-    let y = -pixelOffset;
-    for (let count = 0; count < OVERSCAN_ABOVE && topIndex - count - 1 >= 0; count++) {
-      const i = topIndex - count - 1;
-      y -= store.getHeight(i);
-      let firstOfDay: FirstOfDay | undefined = undefined;
-      const msg = store.findMessage(i);
-      if (msg !== undefined) {
-        if (i === 0) {
-          firstOfDay = { dayKey: dayKey(msg.ts) };
-        } else {
-          const prevMsg = store.findMessage(i - 1);
-          if (prevMsg !== undefined && isDifferentDay(prevMsg.ts, msg.ts)) {
+    // Rows ABOVE topIndex — walk backward.
+    // I-2: topPx for above-rows derived backward from topRow's top (= -pixelOffset).
+    {
+      let y = -pixelOffset;
+      for (let count = 0; count < OVERSCAN_ABOVE && topIndex - count - 1 >= 0; count++) {
+        const i = topIndex - count - 1;
+        y -= store.getHeight(i);
+        let firstOfDay: FirstOfDay | undefined = undefined;
+        const msg = store.findMessage(i);
+        if (msg !== undefined) {
+          if (i === 0) {
             firstOfDay = { dayKey: dayKey(msg.ts) };
+          } else {
+            const prevMsg = store.findMessage(i - 1);
+            if (prevMsg !== undefined && isDifferentDay(prevMsg.ts, msg.ts)) {
+              firstOfDay = { dayKey: dayKey(msg.ts) };
+            }
           }
         }
+        // Include regardless of loaded state.
+        rowsToRender.push({ index: i, topPx: y, firstOfDay });
       }
-      // Include regardless of loaded state.
-      rowsToRender.push({ index: i, topPx: y, firstOfDay });
     }
   }
 
